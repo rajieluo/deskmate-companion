@@ -91,10 +91,15 @@ export class ChatUI {
       this.say(
         brain === "claude_code"
           ? "Claude Code mode: I'll work in your folder with Claude Code."
-          : "Back to normal chat.",
+          : brain === "crew"
+            ? "Crew mode: I'll pass what you say to the first mate and tell you how the crew is doing."
+            : "Back to normal chat.",
         4000,
       );
     });
+    host.onCrewReply((body) => this.speakOut(body));
+    host.onCrewAttention((a) => this.speakOut(a.speech));
+    host.onCrewError((message) => this.say(message, 8000));
   }
 
   get isOpen() {
@@ -162,7 +167,32 @@ export class ChatUI {
 
   private setMode(brain: string) {
     document.body.dataset.brain = brain;
-    this.input.placeholder = brain === "claude_code" ? `Ask ${this.name} to code…` : `Talk to ${this.name}…`;
+    this.input.placeholder =
+      brain === "claude_code"
+        ? `Ask ${this.name} to code…`
+        : brain === "crew"
+          ? "Tell the crew…"
+          : `Talk to ${this.name}…`;
+    this.onModeChange?.(brain);
+  }
+
+  /** Called whenever the brain changes (Crew mode shows its badges). */
+  onModeChange?: (brain: string) => void;
+
+  /** Something she says on her own, such as a crew reply: tags move her, the rest is shown and spoken. */
+  speakOut(text: string) {
+    const tags = new TagStream();
+    const first = tags.feed(text);
+    const last = tags.end();
+    for (const mood of [...first.moods, ...last.moods]) if (mood !== "neutral") this.avatar.emote(mood);
+    const plain = (first.text + last.text).trim();
+    if (!plain) return;
+    this.bubble.classList.remove("thinking");
+    this.activity.hidden = true;
+    this.say(plain);
+    const sentences = new SentenceBuffer();
+    for (const s of [...sentences.push(plain), ...sentences.flush()]) this.voice.say(speakable(s));
+    this.scheduleHide(Math.min(30000, 5000 + plain.split(/\s+/).length * 350));
   }
 
   async send(text: string) {
@@ -230,6 +260,11 @@ export class ChatUI {
       return;
     }
     if (kind === "cancelled") return;
+    if (kind === "crew") {
+      this.avatar.emote("sad");
+      this.say(message, 10000);
+      return;
+    }
     if (kind === "no_key" || kind === "auth") {
       this.askForKey(kind === "auth" ? "That API key didn't work." : undefined);
       return;

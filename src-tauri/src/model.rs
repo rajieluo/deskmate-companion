@@ -43,6 +43,7 @@ pub struct Settings {
     pub stt_model: Option<String>,
     /// "api" (default): chat through the Claude API with an API key.
     /// "claude_code": run Claude Code in `claude_code_folder` with your Claude Code login.
+    /// "crew": talk to a firstmate home in WSL, which runs several Claude Code sessions (see crew.rs).
     pub brain: Option<String>,
     /// Folder Claude Code works in.
     pub claude_code_folder: Option<PathBuf>,
@@ -71,6 +72,10 @@ pub struct Settings {
     /// Saved here rather than by the window-state plugin, which on Windows could
     /// save the 160x28 minimized size.
     pub window_size: Option<[f64; 2]>,
+    /// Crew mode: WSL distribution firstmate runs in. Default: WSL's default distribution.
+    pub crew_distro: Option<String>,
+    /// Crew mode: the firstmate home inside WSL. Default: ~/firstmate.
+    pub crew_home: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
