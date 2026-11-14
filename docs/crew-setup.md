@@ -1,13 +1,41 @@
 # Crew mode: Aqua as the face of firstmate
 
-In Crew mode you talk to Aqua, and she passes what you say to
-[firstmate](https://github.com/kunchenguid/firstmate). Firstmate is a Claude Code
-session (the "first mate") that starts and supervises a crew of other Claude Code
-sessions, each in its own git worktree, and brings back pull requests or reports.
+In Crew mode you talk to Aqua, and she passes what you say to firstmate. Firstmate is a
+Claude Code session (the "first mate") that starts and supervises a crew of other Claude
+Code sessions, each in its own git worktree, and brings back pull requests or reports.
 Aqua reads its replies out loud and shows a badge beside her for each task.
 
-Firstmate supports only macOS and Linux, so on Windows it runs inside WSL2. Setup is
-a one-time job of about 15 minutes.
+There are two ways to run firstmate on Windows:
+
+- **Native, under Git Bash (the default).** Use
+  [firstmate-for-windows](https://github.com/EvanBatten/firstmate-for-windows), a port
+  that runs under Git Bash with [Herdr](https://herdr.dev) as the crew's terminal. Follow
+  [Native Windows](#native-windows-git-bash) below.
+- **WSL2.** Run upstream [firstmate](https://github.com/kunchenguid/firstmate) inside
+  Ubuntu, the platform it's built for. Set `"crew_shell": "wsl"` in settings.json and
+  follow steps 1 to 4 below.
+
+## Native Windows (Git Bash)
+
+1. Install the tools listed in firstmate-for-windows'
+   [install guide](https://github.com/EvanBatten/firstmate-for-windows/blob/main/platform/windows/INSTALL.md):
+   Developer Mode, Git for Windows, PowerShell 7, gh, Node.js, jq, Claude Code, Herdr and
+   Treehouse. Also install Python 3 (`winget install --id Python.Python.3.12 -e`), which
+   firstmate's inbox needs.
+2. Clone it with symlinks on, for example into your projects folder:
+   ```powershell
+   git clone -c core.symlinks=true https://github.com/EvanBatten/firstmate-for-windows "$env:USERPROFILE\Documents\projects\firstmate"
+   ```
+   Then set `"crew_home": "~/Documents/projects/firstmate"` in settings.json (`~` is your
+   Windows user folder in Git Bash).
+3. Recommended: `auto` permission mode for crewmates (see step 3 below). In Git Bash:
+   `echo auto > ~/Documents/projects/firstmate/config/claude-permission-mode`.
+4. Do the guide's one-time [launch steps](https://github.com/EvanBatten/firstmate-for-windows/blob/main/platform/windows/INSTALL.md#launch)
+   (Herdr's shell and the `claude` profile line).
+5. **Open crew terminal** in the tray now starts Herdr in the firstmate folder. Type
+   `claude` in its pane to start the first mate, then continue with step 5 below.
+
+The rest of this guide is the WSL route.
 
 ## 1. Install WSL2 and Ubuntu
 
@@ -93,13 +121,14 @@ In `%APPDATA%\com.rajieluo.desktopassistant\settings.json`:
 
 | Setting       | Default              | Meaning                                         |
 | ------------- | -------------------- | ----------------------------------------------- |
-| `crew_home`   | `~/firstmate`        | The firstmate folder inside WSL                 |
+| `crew_shell`  | `git-bash` when Git for Windows is installed, else `wsl` | How the app reaches firstmate |
+| `crew_home`   | `~/firstmate`        | The firstmate folder (in Git Bash or WSL terms) |
 | `crew_distro` | an Ubuntu distro if there is one | Which WSL distribution to use, e.g. `"Ubuntu"`. Docker Desktop's distros are always skipped. |
 
 ## How it works
 
-The app writes a small helper, `crew.sh`, to its data folder and runs it with
-`wsl.exe --exec /bin/bash --login`. It only uses firstmate's documented surfaces for
+The app writes a small helper, `crew.sh`, to its data folder and runs it with Git
+Bash's `bash.exe --login`, or with `wsl.exe --exec /bin/bash --login` in WSL mode. It only uses firstmate's documented surfaces for
 outside tools:
 
 - `bin/fm-inbox.sh note --json --request-id …` sends a message. The text goes in on

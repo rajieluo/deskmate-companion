@@ -54,13 +54,29 @@ if [ ! -f "$home/AGENTS.md" ] || [ ! -x "$home/bin/fm-inbox.sh" ]; then
 fi
 cd "$home" || exit 20
 export FM_HOME=$PWD
+# Native Windows (firstmate-for-windows under Git Bash): load its overlay, and let
+# python3 mean the python.exe that the Windows installer provides.
+if [ -f platform/windows/env.sh ]; then
+  . platform/windows/env.sh >/dev/null 2>&1
+fi
+if ! python3 -c '' >/dev/null 2>&1; then
+  for py in python py; do
+    if command -v "$py" >/dev/null 2>&1 && "$py" -c 'import sys; sys.exit(sys.version_info[0] != 3)' >/dev/null 2>&1; then
+      eval "python3() { $py \"\$@\"; }"
+      export -f python3
+      break
+    fi
+  done
+fi
 case $cmd in
   check)
     # Turn on the fleet ledger, which is how the app follows the crew's tasks.
     mkdir -p config && touch config/fleet-ledger
-    for tool in claude tmux gh git python3; do
+    for tool in claude gh git; do
       command -v "$tool" >/dev/null 2>&1 || echo "missing $tool"
     done
+    python3 -c '' >/dev/null 2>&1 || echo "missing python3"
+    command -v tmux >/dev/null 2>&1 || command -v herdr >/dev/null 2>&1 || echo "missing tmux-or-herdr"
     echo ok
     ;;
   note)
@@ -88,6 +104,10 @@ case $cmd in
     exec bin/fm-inbox.sh status
     ;;
   open)
+    if command -v herdr >/dev/null 2>&1; then
+      # Windows: Herdr is the crew's terminal. Start the first mate in its pane with `claude`.
+      exec herdr
+    fi
     if command -v tmux >/dev/null 2>&1; then
       exec tmux new-session -A -s firstmate claude
     fi
@@ -110,8 +130,20 @@ no Markdown, starting with one emotion tag from {tags}.)",
     )
 }
 
+/// How the app reaches firstmate.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Shell {
+    /// Windows: firstmate-for-windows under Git Bash (this is bash.exe).
+    GitBash(PathBuf),
+    /// Windows: firstmate inside WSL2.
+    Wsl,
+    /// Linux/macOS (development): plain bash.
+    Unix,
+}
+
 #[derive(Clone, Debug)]
 pub struct CrewConfig {
+    pub shell: Shell,
     /// WSL distribution, or None for the default one.
     pub distro: Option<String>,
     /// Firstmate home inside WSL, e.g. ~/firstmate.
@@ -121,11 +153,57 @@ pub struct CrewConfig {
 impl CrewConfig {
     pub fn from_settings(store: &ModelStore) -> Self {
         let s = store.settings();
+        let shell = if !cfg!(windows) {
+            Shell::Unix
+        } else if s.crew_shell.as_deref() == Some("wsl") {
+            Shell::Wsl
+        } else {
+            match find_git_bash() {
+                Some(bash) => Shell::GitBash(bash),
+                None if s.crew_shell.as_deref() == Some("git-bash") => Shell::GitBash("bash.exe".into()),
+                None => Shell::Wsl,
+            }
+        };
+        let distro = if shell == Shell::Wsl {
+            s.crew_distro.filter(|d| !d.trim().is_empty()).or_else(auto_distro)
+        } else {
+            None
+        };
         Self {
-            distro: s.crew_distro.filter(|d| !d.trim().is_empty()).or_else(auto_distro),
+            shell,
+            distro,
             home: s.crew_home.filter(|h| !h.trim().is_empty()).unwrap_or_else(|| DEFAULT_HOME.into()),
         }
     }
+}
+
+/// Git for Windows' bash.exe. Never System32\bash.exe, which is WSL's.
+pub fn find_git_bash() -> Option<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    for var in ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"] {
+        if let Some(dir) = std::env::var_os(var) {
+            candidates.push(PathBuf::from(dir).join("Git").join("bin").join("bash.exe"));
+        }
+    }
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        candidates.push(PathBuf::from(local).join("Programs").join("Git").join("bin").join("bash.exe"));
+    }
+    // git.exe on PATH lives in <Git>\cmd or <Git>\bin.
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            if dir.join("git.exe").is_file() {
+                if let Some(root) = dir.parent() {
+                    candidates.push(root.join("bin").join("bash.exe"));
+                }
+            }
+        }
+    }
+    candidates.into_iter().find(|p| p.is_file())
+}
+
+/// C:\Users\x\crew.sh -> C:/Users/x/crew.sh, which Git Bash accepts.
+fn to_git_bash_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }
 
 /// Distributions that can't host firstmate (Docker Desktop's internal ones).
@@ -198,20 +276,27 @@ fn helper_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn helper_command(helper: &Path, config: &CrewConfig, args: &[&str]) -> tokio::process::Command {
-    let mut cmd;
-    if cfg!(windows) {
-        cmd = tokio::process::Command::new("wsl.exe");
-        if let Some(distro) = &config.distro {
-            cmd.arg("-d").arg(distro);
+/// The program and arguments that run the helper: `<program> <args...> <home> <command...>`.
+fn helper_argv(helper: &Path, config: &CrewConfig) -> (PathBuf, Vec<String>) {
+    match &config.shell {
+        Shell::GitBash(bash) => (bash.clone(), vec!["--login".into(), to_git_bash_path(helper)]),
+        Shell::Wsl => {
+            let mut args = Vec::new();
+            if let Some(distro) = &config.distro {
+                args.extend(["-d".to_string(), distro.clone()]);
+            }
+            args.extend(["--exec", "/bin/bash", "--login"].map(String::from));
+            args.push(to_wsl_path(helper));
+            ("wsl.exe".into(), args)
         }
-        cmd.args(["--exec", "/bin/bash", "--login"]).arg(to_wsl_path(helper));
-    } else {
-        // Linux/macOS (development): run firstmate directly.
-        cmd = tokio::process::Command::new("bash");
-        cmd.arg("--login").arg(helper);
+        Shell::Unix => ("bash".into(), vec!["--login".into(), helper.to_string_lossy().into_owned()]),
     }
-    cmd.arg(&config.home).args(args);
+}
+
+fn helper_command(helper: &Path, config: &CrewConfig, args: &[&str]) -> tokio::process::Command {
+    let (program, pre) = helper_argv(helper, config);
+    let mut cmd = tokio::process::Command::new(program);
+    cmd.args(pre).arg(&config.home).args(args);
     #[cfg(windows)]
     {
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
@@ -242,12 +327,10 @@ pub async fn run_helper<R: Runtime>(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let mut child = cmd.spawn().map_err(|e| {
-        if cfg!(windows) {
-            format!("I couldn't start WSL ({e}). Crew mode needs WSL2 with firstmate installed; see docs/crew-setup.md.")
-        } else {
-            format!("Couldn't run bash: {e}")
-        }
+    let mut child = cmd.spawn().map_err(|e| match config.shell {
+        Shell::Wsl => format!("I couldn't start WSL ({e}). See docs/crew-setup.md."),
+        Shell::GitBash(_) => format!("I couldn't start Git Bash ({e}). Is Git for Windows installed?"),
+        Shell::Unix => format!("Couldn't run bash: {e}"),
     })?;
     if let (Some(text), Some(mut pipe)) = (stdin, child.stdin.take()) {
         let _ = pipe.write_all(text.as_bytes()).await;
@@ -264,10 +347,11 @@ pub async fn run_helper<R: Runtime>(
 pub fn explain_failure(config: &CrewConfig, out: &Output) -> String {
     match out.code {
         20 => format!(
-            "I can't find firstmate at {} in WSL. Clone it there, or set crew_home in settings.json.",
-            config.home
+            "I can't find firstmate at {}{}. Clone it there, or set crew_home in settings.json.",
+            config.home,
+            if config.shell == Shell::Wsl { " in WSL" } else { "" }
         ),
-        127 => "WSL couldn't run the helper script. Is bash installed in your WSL distribution?".into(),
+        127 => "Bash couldn't run the helper script.".into(),
         _ if out.stderr.contains("no installed distributions") || out.stderr.contains("WSL_E_DEFAULT_DISTRO_NOT_FOUND") => {
             "WSL has no Linux distribution yet. Run `wsl --install -d Ubuntu` first; see docs/crew-setup.md.".into()
         }
@@ -524,7 +608,14 @@ impl Crew {
             log::warn!("crew: missing in WSL: {}", missing.join(", "));
         }
         if missing.contains(&"claude") {
-            return Err("Claude Code isn't installed inside WSL yet. See docs/crew-setup.md.".into());
+            return Err(if config.shell == Shell::Wsl {
+                "Claude Code isn't installed inside WSL yet. See docs/crew-setup.md.".into()
+            } else {
+                "Git Bash can't find Claude Code. See docs/crew-setup.md.".into()
+            });
+        }
+        if missing.contains(&"python3") {
+            return Err("firstmate's inbox needs Python 3, and I can't find it. See docs/crew-setup.md.".into());
         }
         self.checked.store(true, Ordering::SeqCst);
         Ok(())
@@ -635,17 +726,15 @@ impl Crew {
         if !cfg!(windows) {
             return Err("Opening the crew terminal is only supported on Windows.".into());
         }
-        let mut cmd = std::process::Command::new("wsl.exe");
-        if let Some(distro) = &config.distro {
-            cmd.arg("-d").arg(distro);
-        }
-        cmd.args(["--exec", "/bin/bash", "--login"]).arg(to_wsl_path(&helper)).arg(&config.home).arg("open");
+        let (program, pre) = helper_argv(&helper, &config);
+        let mut cmd = std::process::Command::new(program);
+        cmd.args(pre).arg(&config.home).arg("open");
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
             cmd.creation_flags(0x0000_0010); // CREATE_NEW_CONSOLE
         }
-        cmd.spawn().map(|_| ()).map_err(|e| format!("Couldn't open WSL: {e}"))
+        cmd.spawn().map(|_| ()).map_err(|e| format!("Couldn't open the crew terminal: {e}"))
     }
 }
 
@@ -714,6 +803,18 @@ mod tests {
         assert_eq!(list, vec![Reply { id: "n1".into(), body: "[happy] On it.".into() }]);
         assert_eq!(cursor.as_deref(), Some("000000000001"));
         assert!(split_poll("no marker").is_none());
+    }
+
+    #[test]
+    fn builds_the_helper_command_for_each_shell() {
+        let helper = Path::new(r"C:\Users\Alex\AppData\Roaming\x\crew.sh");
+        let cfg = |shell, distro: Option<&str>| CrewConfig { shell, distro: distro.map(String::from), home: "~/firstmate".into() };
+        let (p, a) = helper_argv(helper, &cfg(Shell::GitBash(r"C:\Program Files\Git\bin\bash.exe".into()), None));
+        assert_eq!(p, PathBuf::from(r"C:\Program Files\Git\bin\bash.exe"));
+        assert_eq!(a, vec!["--login", "C:/Users/Alex/AppData/Roaming/x/crew.sh"]);
+        let (p, a) = helper_argv(helper, &cfg(Shell::Wsl, Some("Ubuntu")));
+        assert_eq!(p, PathBuf::from("wsl.exe"));
+        assert_eq!(a, vec!["-d", "Ubuntu", "--exec", "/bin/bash", "--login", "/mnt/c/Users/Alex/AppData/Roaming/x/crew.sh"]);
     }
 
     #[test]
