@@ -493,6 +493,15 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // A second launch just brings the running one forward. Two copies fight over the
+        // hotkeys and the settings file, and one of them may be an old version.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            log::info!("second launch: showing the running instance instead");
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }))
         // Log file: %LOCALAPPDATA%\com.rajieluo.desktopassistant\logs\Desktop Assistant.log on Windows.
         .plugin(
             tauri_plugin_log::Builder::new()

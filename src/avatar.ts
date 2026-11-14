@@ -97,7 +97,19 @@ export class Avatar {
   }
 
   /** Draws the whole model canvas once and records where the visible figure is. */
+  /** True while measureCrop has the model at its measuring position; place() waits. */
+  private measuring = false;
+
   private async measureCrop() {
+    this.measuring = true;
+    try {
+      await this.measureCropInner();
+    } finally {
+      this.measuring = false;
+    }
+  }
+
+  private async measureCropInner() {
     const model = this.model!;
     const { width: vw, height: vh } = this.app.screen;
     const nw = model.internalModel.width;
@@ -144,7 +156,9 @@ export class Avatar {
 
   place() {
     const model = this.model;
-    if (!model) return;
+    // A toggle (fade, zoom) arriving mid-measurement would move the model and spoil
+    // the crop; load() calls place() again once measuring is done.
+    if (!model || this.measuring) return;
     const { width: vw, height: vh } = this.app.screen;
     const p = layout(this.crop, model.internalModel.width, model.internalModel.height, vw, vh, {
       zoom: this.zoom,
