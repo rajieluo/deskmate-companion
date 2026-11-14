@@ -74,7 +74,7 @@ export class KokoroEngine implements SpeechEngine {
   /** Native in the desktop app unless WebGPU was asked for; WASM if the native voice won't load. */
   private chooseMode() {
     return (this.mode ??= (async () => {
-      if (!inTauri || this.device === "gpu") return this.device;
+      if (!inTauri) return this.device;
       onTtsProgress((p) => this.onStatus(`Downloading voice… ${Math.floor(p)}%`));
       try {
         const threads = await ttsPrepare();
@@ -82,7 +82,7 @@ export class KokoroEngine implements SpeechEngine {
         return "native" as const;
       } catch (e) {
         log("warn", `[voice] native voice unavailable, using the slower built-in one: ${e}`);
-        return "cpu" as const;
+        return this.device;
       } finally {
         this.onStatus("");
       }

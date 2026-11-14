@@ -29,3 +29,7 @@ keyring = { version = "3", features = ["windows-native", "apple-native", "linux-
 tauri-plugin-global-shortcut = "2"
 whisper-rs = "0.16"
 tokio = { version = "1", features = ["sync", "process", "io-util"] }
+
+[target.'cfg(windows)'.dependencies]
+# DirectML lets the native voice run on the GPU (settings voice_device "gpu").
+ort = { version = "=2.0.0-rc.9", default-features = false, features = ["load-dynamic", "directml"] }
