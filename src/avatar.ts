@@ -53,7 +53,11 @@ export class Avatar {
   /** Parameters that follow the mouse for the current model (see look.ts). */
   lookParams: LookParams | null = null;
 
-  async load(url: string, look: Partial<Record<string, string>> = {}): Promise<MotionSummary> {
+  async load(
+    url: string,
+    look: Partial<Record<string, string>> = {},
+    params: Record<string, number> = {},
+  ): Promise<MotionSummary> {
     const id = ++this.loadId;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Could not read ${url} (HTTP ${res.status})`);
@@ -73,7 +77,14 @@ export class Avatar {
     this.model = model;
     this.groups = settings.FileReferences.Motions ?? {};
     this.lipSyncIds = lipSyncIds(json);
-    model.internalModel.on("beforeModelUpdate", () => this.applyMouth());
+    const held = Object.entries(params).filter(([, v]) => typeof v === "number");
+    model.internalModel.on("beforeModelUpdate", () => {
+      if (held.length) {
+        const core = model.internalModel.coreModel as unknown as { setParameterValueById(id: string, v: number): void };
+        for (const [id, v] of held) core.setParameterValueById(id, v);
+      }
+      this.applyMouth();
+    });
     this.lookParams = applyLookParams(model, look);
     this.summary = summary;
     model.alpha = 0;
@@ -214,6 +225,41 @@ export class Avatar {
       setParameterValueById(id: string, value: number, weight?: number): void;
     };
     for (const id of this.lipSyncIds) core.setParameterValueById(id, v);
+  }
+
+  /**
+   * One-line summary of the model for the log: Cubism versions, and the mouth
+   * parameters' values as the next frame is drawn (so "mouth stuck open" can be
+   * told apart from art that just looks open).
+   */
+  diagnostics(): Promise<string> {
+    const model = this.model;
+    if (!model) return Promise.resolve("no model");
+    const im = model.internalModel;
+    type Params = { count: number; ids: string[]; defaultValues: Float32Array; minimumValues: Float32Array; maximumValues: Float32Array };
+    const core = im.coreModel as unknown as { _model?: { parameters: Params }; getParameterValueByIndex(i: number): number };
+    return new Promise((resolve) => {
+      im.once("beforeModelUpdate", () => {
+        const p = core._model?.parameters;
+        const cubism = (window as unknown as { Live2DCubismCore?: { Version: { csmGetVersion(): number; csmGetLatestMocVersion(): number } } })
+          .Live2DCubismCore?.Version;
+        const v = cubism?.csmGetVersion() ?? 0;
+        const parts = [
+          `core ${(v >>> 24) & 0xff}.${(v >>> 16) & 0xff}.${v & 0xffff}`,
+          `latest moc ${cubism?.csmGetLatestMocVersion()}`,
+          `params ${p?.count}`,
+        ];
+        if (p) {
+          for (let i = 0; i < p.count; i++) {
+            if (!/mouth|jaw|lip/i.test(p.ids[i])) continue;
+            const f = (n: number) => +n.toFixed(2);
+            parts.push(`${p.ids[i]}=${f(core.getParameterValueByIndex(i))} (default ${f(p.defaultValues[i])}, ${f(p.minimumValues[i])}..${f(p.maximumValues[i])})`);
+          }
+        }
+        parts.push(`lipsync ${this.lipSyncIds.join(",")}`);
+        resolve(parts.join("; "));
+      });
+    });
   }
 
   private followMouse = true;

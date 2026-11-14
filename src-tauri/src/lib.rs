@@ -68,6 +68,16 @@ struct ChatStatus {
     claude_code_folder: Option<String>,
 }
 
+/// Lets the page write to the log file (diagnostics, errors).
+#[tauri::command]
+fn page_log(level: String, message: String) {
+    match level.as_str() {
+        "error" => log::error!("[page] {message}"),
+        "warn" => log::warn!("[page] {message}"),
+        _ => log::info!("[page] {message}"),
+    }
+}
+
 #[tauri::command]
 fn chat_status(store: State<'_, Arc<ModelStore>>) -> ChatStatus {
     let s = store.settings();
@@ -477,7 +487,8 @@ pub fn run() {
             chat_reset,
             stt_prepare,
             pick_claude_code_folder,
-            transcribe
+            transcribe,
+            page_log
         ])
         .run(tauri::generate_context!())
         .expect("error while running Desktop Assistant");

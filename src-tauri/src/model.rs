@@ -51,6 +51,9 @@ pub struct Settings {
     /// model's folder name, e.g. {"xch003_01": {"angle_x": "Param12"}}. Keys:
     /// angle_x, angle_y, angle_z, eye_x, eye_y, body_x. Use "" to turn one off.
     pub look_params: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Per-model parameter values held every frame, keyed by folder name, e.g.
+    /// {"Nicole": {"MouthJawOpen": 0}}. Lip sync still moves the mouth while speaking.
+    pub model_params: Option<serde_json::Map<String, serde_json::Value>>,
     /// Head and eyes follow the mouse cursor. Default: true.
     pub follow_mouse: Option<bool>,
 }
@@ -66,6 +69,8 @@ pub struct ModelInfo {
     pub generation: u64,
     /// This model's entry from `look_params`, if any.
     pub look: Option<serde_json::Value>,
+    /// This model's entry from `model_params`, if any.
+    pub params: Option<serde_json::Value>,
 }
 
 struct Inner {
@@ -106,12 +111,14 @@ impl ModelStore {
         let inner = self.inner.lock().unwrap();
         let path = inner.settings.model_path.as_ref()?;
         let folder = path.parent().and_then(|p| p.file_name()).map(|f| f.to_string_lossy().into_owned());
-        let look = inner.settings.look_params.as_ref().zip(folder).and_then(|(m, f)| m.get(&f).cloned());
+        let look = inner.settings.look_params.as_ref().zip(folder.clone()).and_then(|(m, f)| m.get(&f).cloned());
+        let params = inner.settings.model_params.as_ref().zip(folder).and_then(|(m, f)| m.get(&f).cloned());
         Some(ModelInfo {
             file_name: path.file_name()?.to_string_lossy().into_owned(),
             path: path.display().to_string(),
             generation: inner.generation,
             look,
+            params,
         })
     }
 

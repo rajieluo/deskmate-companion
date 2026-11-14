@@ -43,6 +43,9 @@ function showStatus(text: string | null, { pick = false } = {}) {
   statusBox.toggleAttribute("data-hit", text !== null);
 }
 
+window.addEventListener("error", (e) => host.log("error", `[page] ${e.message} at ${e.filename}:${e.lineno}`));
+window.addEventListener("unhandledrejection", (e) => host.log("error", `[page] unhandled: ${String(e.reason?.stack ?? e.reason)}`));
+
 async function load(source: host.ModelSource | null) {
   if (!("Live2DCubismCore" in window)) {
     showStatus(
@@ -56,13 +59,15 @@ async function load(source: host.ModelSource | null) {
   }
   showStatus("Loading model…");
   try {
-    const summary = await avatar.load(source.url, source.look);
+    const summary = await avatar.load(source.url, source.look, source.params);
     showStatus(null);
-    console.info("[avatar] loaded", source.label, summary);
+    host.log("info", `[avatar] loaded ${source.label}: ${JSON.stringify(summary)}; look ${JSON.stringify(avatar.lookParams)}`);
+    // A second later, once idle motions have started, record the mouth state.
+    setTimeout(() => void avatar.diagnostics().then((d) => host.log("info", `[avatar] ${d}`)), 1500);
     document.body.dataset.ready = "true";
   } catch (err) {
     if ((err as Error).message === "superseded") return;
-    console.error(err);
+    host.log("error", `[avatar] couldn't load ${source.label}: ${(err as Error).message}`);
     showStatus(`Couldn't load ${source.label}\n${(err as Error).message}`, { pick: true });
   }
 }

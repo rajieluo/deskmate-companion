@@ -1,3 +1,5 @@
+import { log } from "./host";
+
 // Speaks reply text sentence by sentence and exposes a mouth-open level for lip sync.
 //
 // Sentences are synthesized one ahead of playback, so the next one is usually
@@ -31,12 +33,13 @@ export class KokoroEngine implements SpeechEngine {
       const m = e.data;
       if (m.type === "progress") this.onStatus(`Downloading voice… ${Math.round(m.progress)}%`);
       else if (m.type === "ready") {
-        console.info(`[voice] Kokoro running on ${m.device}`);
+        log("info", `[voice] Kokoro running on ${m.device}`);
         this.onStatus("");
       }
       else if (m.type === "audio") this.pending.get(m.id)?.resolve({ audio: m.audio, rate: m.rate });
       else if (m.type === "error") {
         if (m.id === -1) this.onStatus(`Voice failed to load: ${m.message}`);
+        log("error", `[voice] ${m.message}`);
         this.pending.get(m.id)?.reject(new Error(m.message));
       }
       if (m.id !== undefined) this.pending.delete(m.id);

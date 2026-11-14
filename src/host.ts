@@ -12,6 +12,7 @@ export interface ModelInfo {
   path: string;
   generation: number;
   look?: unknown;
+  params?: unknown;
 }
 
 export interface ModelSource {
@@ -19,6 +20,8 @@ export interface ModelSource {
   label: string;
   /** Overrides from settings.json `look_params` for this model. */
   look?: Partial<Record<string, string>>;
+  /** Parameter values held every frame, from settings.json `model_params`. */
+  params?: Record<string, number>;
 }
 
 function toSource(info: ModelInfo): ModelSource {
@@ -28,6 +31,7 @@ function toSource(info: ModelInfo): ModelSource {
     url: `${base}${info.generation}/${encodeURIComponent(info.file_name)}`,
     label: info.path,
     look: (info.look as ModelSource["look"]) ?? undefined,
+    params: (info.params as ModelSource["params"]) ?? undefined,
   };
 }
 
@@ -117,6 +121,12 @@ export interface ChatHandlers {
 
 let browserTurn = 0;
 let browserHandlers: ChatHandlers | null = null;
+
+/** Writes a line to the app's log file (and the console). */
+export function log(level: "info" | "warn" | "error", message: string) {
+  (level === "info" ? console.info : level === "warn" ? console.warn : console.error)(message);
+  if (inTauri) void invoke("page_log", { level, message }).catch(() => {});
+}
 
 export async function chatStatus(): Promise<ChatStatus> {
   if (!inTauri) {
