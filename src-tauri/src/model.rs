@@ -27,6 +27,12 @@ pub struct Settings {
     pub chat_effort: Option<String>,
     /// Replaces the whole built-in persona prompt when set.
     pub persona: Option<String>,
+    /// Speak replies out loud with Kokoro. Default: true.
+    pub voice_enabled: Option<bool>,
+    /// Kokoro voice id, e.g. af_heart, af_bella, af_nicole. Default: af_heart.
+    pub voice: Option<String>,
+    /// Speaking speed, 0.5 to 2. Default: 1.
+    pub voice_speed: Option<f32>,
 }
 
 #[derive(Clone, Serialize)]
@@ -63,6 +69,11 @@ impl ModelStore {
             default.is_file().then_some(default)
         });
         Self { settings_file, inner: Mutex::new(Inner { settings, generation: 1 }) }
+    }
+
+    pub fn update(&self, change: impl FnOnce(&mut Settings)) {
+        change(&mut self.inner.lock().unwrap().settings);
+        self.save();
     }
 
     pub fn settings(&self) -> Settings {

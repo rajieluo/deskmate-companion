@@ -10,7 +10,7 @@ It runs in a small transparent, always-on-top window. Clicks pass through to wha
 |---|---|
 | 1. Transparent on-top window, Live2D model idling, drag, click-through | done |
 | 2. Typed chat with Claude (streaming), emotion tags drive motions | done |
-| 3. Local Kokoro TTS with lip sync | planned |
+| 3. Local Kokoro TTS with lip sync | done |
 | 4. Local whisper.cpp voice input | planned |
 
 ## Running it
@@ -33,6 +33,7 @@ Every pull request also builds a Windows installer in CI; download it from the r
 - **Click** her (or press **Ctrl+Shift+Space** anywhere) to open the chat box. Type and press Enter; Esc closes it.
 - The first time you chat she asks for an [Anthropic API key](https://console.anthropic.com/settings/keys). It is stored in Windows Credential Manager, never in a file. `ANTHROPIC_API_KEY` in the environment also works. *Set API key…* in the tray changes it.
 - *Forget conversation* in the tray starts a fresh conversation.
+- She **speaks her replies** with [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), running locally, and her mouth follows the audio. The voice model (about 90 MB) downloads from Hugging Face the first time and is cached after that. It uses the GPU through WebGPU when available, otherwise the CPU. *Speak replies* in the tray turns the voice on or off.
 - **Ctrl + mouse wheel** over her makes the window bigger or smaller.
 - **Keys 1 to 7** (after clicking her) play happy, sad, angry, surprised, shy, thinking and proud, so you can check a model's motions.
 
@@ -46,12 +47,16 @@ Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistan
   "character_name": "Aqua",
   "chat_model": "claude-opus-5-5",
   "chat_effort": "low",
-  "persona": null
+  "persona": null,
+  "voice_enabled": true,
+  "voice": "af_heart",
+  "voice_speed": 1.0
 }
 ```
 
 - `chat_model`: any Claude model id. The default is Claude Opus 5.5. `claude-haiku-5-5` is much cheaper and faster if replies are good enough for you.
 - `chat_effort`: `low` (default, quick chatty replies), `medium`, `high`, `xhigh` or `max`.
+- `voice_enabled`, `voice`, `voice_speed`: speech on or off, the Kokoro voice (`af_heart` by default; also `af_bella`, `af_nicole`, `af_sky`, `bf_emma` and [others](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md)) and speed (0.5 to 2).
 - `persona`: replaces the built-in personality prompt. Keep the line asking for one emotion tag per reply (`[happy] [sad] [angry] [surprised] [shy] [thinking] [proud] [neutral]`), since the tags are what make her move.
 
 Claude starts each reply with an emotion tag such as `[happy]`. The app strips the tags from the text and plays the matching motion. The API call is made from the Rust side, so the key never reaches the web page. Server-side refusal fallbacks are turned on, so if Claude Opus 5.5 declines a message the API retries it on a fallback model in the same call.
@@ -72,6 +77,7 @@ The app measures where the character actually is inside the model's canvas and c
 ## Developing
 
 - `npm run dev` serves the web part on http://localhost:1420. In a normal browser you can load a model with `?model=/path/to/model.model3.json` (relative to the repo, e.g. a model copied into `tests/fixtures/`, which is git-ignored).
+- Add `&tts=beep` to the dev URL to replace Kokoro with beeps, for testing lip sync without downloading the voice model.
 - `npm run fixtures` downloads Live2D's free sample model Hiyori into `tests/fixtures/` for testing.
 - `npm test` runs the web unit tests, `cargo test` (in `src-tauri/`) the Rust ones.
 
@@ -83,3 +89,4 @@ Tauri can only make a whole window ignore the mouse. So the Rust side polls the 
 
 - [Live2D Cubism Core](https://www.live2d.com/en/sdk/license/) is downloaded at install time and is subject to the Live2D Proprietary Software License. It is free for individuals and small businesses.
 - [pixi-live2d-display](https://github.com/guansss/pixi-live2d-display) (MIT) renders the models.
+- [kokoro-js](https://www.npmjs.com/package/kokoro-js) (Apache-2.0) and the Kokoro-82M model (Apache-2.0) do text to speech.

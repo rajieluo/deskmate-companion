@@ -92,6 +92,9 @@ export interface ChatStatus {
   has_key: boolean;
   name: string;
   model: string;
+  voice_enabled: boolean;
+  voice: string;
+  voice_speed: number;
 }
 export interface ChatHandlers {
   delta: (turn: number, text: string) => void;
@@ -103,7 +106,9 @@ let browserTurn = 0;
 let browserHandlers: ChatHandlers | null = null;
 
 export async function chatStatus(): Promise<ChatStatus> {
-  if (!inTauri) return { has_key: true, name: "Aqua", model: "demo" };
+  if (!inTauri) {
+    return { has_key: true, name: "Aqua", model: "demo", voice_enabled: true, voice: "af_heart", voice_speed: 1 };
+  }
   return invoke<ChatStatus>("chat_status");
 }
 
@@ -145,4 +150,8 @@ export function onChat(handlers: ChatHandlers) {
 
 export function onEvent(name: "open-chat" | "open-api-key" | "chat-reset", cb: () => void) {
   if (inTauri) void listen(name, () => cb());
+}
+
+export function onVoiceChanged(cb: (enabled: boolean) => void) {
+  if (inTauri) void listen<boolean>("voice-changed", (e) => cb(e.payload));
 }
