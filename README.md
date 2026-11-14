@@ -77,6 +77,10 @@ Each message runs `claude -p` in that folder and continues the same Claude Code 
 
 Permissions: there is no one to click "Allow" in this mode, so it runs with `acceptEdits` by default. Claude Code can read and edit files in the folder, but shell commands outside its safe list are refused. Change `claude_code_permission_mode` in `settings.json` to `auto` (lets Claude Code's classifier allow safe commands) or another mode if you want more.
 
+## Crew mode (firstmate)
+
+Crew mode makes her the face of [firstmate](https://github.com/kunchenguid/firstmate), which runs several Claude Code sessions in parallel, each in its own git worktree. You talk to her; she passes it to firstmate's first mate, reads out its answers, and shows a badge for each task (blue working, amber needs you, green PR ready, red failed). Firstmate runs in WSL2. Setup and details: [docs/crew-setup.md](docs/crew-setup.md).
+
 ## Chat settings
 
 Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistant\` (created on first run). Edit it while the app is closed:

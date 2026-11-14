@@ -21,6 +21,7 @@ const poses = new PosePicker(avatar);
 const chat = new ChatUI(avatar, voice);
 const crew = new CrewUI();
 chat.onModeChange = (brain) => crew.setEnabled(brain === "crew");
+(window as unknown as { crewUI: CrewUI }).crewUI = crew;
 kokoro.onStatus = (s) => chat.status(s);
 void host.chatStatus().then((s) => {
   voice.enabled = s.voice_enabled;
