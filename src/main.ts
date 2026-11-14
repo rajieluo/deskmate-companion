@@ -22,6 +22,7 @@ void host.chatStatus().then((s) => {
   avatar.setFollowMouse(s.follow_mouse);
   kokoro.voice = s.voice;
   kokoro.speed = s.voice_speed;
+  kokoro.device = s.voice_device === "gpu" ? "gpu" : "cpu";
   // Start the (large, first-time) model download early instead of on the first reply.
   if (s.voice_enabled && !useBeep) kokoro.warmUp();
 });

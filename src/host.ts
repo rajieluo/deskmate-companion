@@ -103,6 +103,7 @@ export interface ChatStatus {
   follow_mouse: boolean;
   voice: string;
   voice_speed: number;
+  voice_device: string;
   brain: "api" | "claude_code";
   claude_code_folder: string | null;
 }
@@ -119,7 +120,7 @@ let browserHandlers: ChatHandlers | null = null;
 
 export async function chatStatus(): Promise<ChatStatus> {
   if (!inTauri) {
-    return { has_key: true, name: "Aqua", model: "demo", voice_enabled: true, follow_mouse: true, voice: "af_heart", voice_speed: 1, brain: "api", claude_code_folder: null };
+    return { has_key: true, name: "Aqua", model: "demo", voice_enabled: true, follow_mouse: true, voice: "af_heart", voice_speed: 1, voice_device: "cpu", brain: "api", claude_code_folder: null };
   }
   return invoke<ChatStatus>("chat_status");
 }

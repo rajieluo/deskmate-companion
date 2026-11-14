@@ -16,6 +16,9 @@ export class KokoroEngine implements SpeechEngine {
   private pending = new Map<number, { resolve: (v: { audio: Float32Array; rate: number }) => void; reject: (e: Error) => void }>();
   onStatus: (status: string) => void = () => {};
 
+  /** "cpu" (WASM) or "gpu" (WebGPU). Read when the model first loads. */
+  device: "cpu" | "gpu" = "cpu";
+
   constructor(
     public voice = "af_heart",
     public speed = 1,
@@ -27,7 +30,10 @@ export class KokoroEngine implements SpeechEngine {
     w.onmessage = (e) => {
       const m = e.data;
       if (m.type === "progress") this.onStatus(`Downloading voice… ${Math.round(m.progress)}%`);
-      else if (m.type === "ready") this.onStatus("");
+      else if (m.type === "ready") {
+        console.info(`[voice] Kokoro running on ${m.device}`);
+        this.onStatus("");
+      }
       else if (m.type === "audio") this.pending.get(m.id)?.resolve({ audio: m.audio, rate: m.rate });
       else if (m.type === "error") {
         if (m.id === -1) this.onStatus(`Voice failed to load: ${m.message}`);
@@ -40,14 +46,14 @@ export class KokoroEngine implements SpeechEngine {
   }
 
   warmUp() {
-    this.ensure().postMessage({ type: "load" });
+    this.ensure().postMessage({ type: "load", device: this.device });
   }
 
   synthesize(text: string) {
     const id = ++this.nextId;
     return new Promise<{ audio: Float32Array; rate: number }>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.ensure().postMessage({ type: "speak", id, text, voice: this.voice, speed: this.speed });
+      this.ensure().postMessage({ type: "speak", id, text, voice: this.voice, speed: this.speed, device: this.device });
     });
   }
 }

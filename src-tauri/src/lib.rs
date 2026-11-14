@@ -63,6 +63,7 @@ struct ChatStatus {
     follow_mouse: bool,
     voice: String,
     voice_speed: f32,
+    voice_device: String,
     /// "api" or "claude_code"
     brain: String,
     claude_code_folder: Option<String>,
@@ -79,6 +80,7 @@ fn chat_status(store: State<'_, Arc<ModelStore>>) -> ChatStatus {
         follow_mouse: s.follow_mouse.unwrap_or(true),
         voice: s.voice.unwrap_or_else(|| "af_heart".into()),
         voice_speed: s.voice_speed.unwrap_or(1.0).clamp(0.5, 2.0),
+        voice_device: s.voice_device.unwrap_or_else(|| "cpu".into()),
         brain: s.brain.unwrap_or_else(|| "api".into()),
         claude_code_folder: s.claude_code_folder.map(|p| p.display().to_string()),
     }
