@@ -54,10 +54,16 @@ pub struct Settings {
     /// Per-model parameter values held every frame, keyed by folder name, e.g.
     /// {"Nicole": {"MouthJawOpen": 0}}. Lip sync still moves the mouth while speaking.
     pub model_params: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Global hotkeys, e.g. {"talk": "Ctrl+Shift+Space", "listen": "Ctrl+Alt+M", "mute": "Ctrl+Alt+U"}.
+    /// Use "" to turn one off.
+    pub hotkeys: Option<std::collections::HashMap<String, String>>,
     /// Fade out the bottom edge of the figure. Default: true.
     pub fade_bottom: Option<bool>,
     /// Head and eyes follow the mouse cursor. Default: true.
     pub follow_mouse: Option<bool>,
+    /// Voice picked in the tray for a model, keyed by folder name, e.g. {"Nicole": "af_nicole"}.
+    /// Wins over the folder's own voice.txt / persona.md and over `voice`.
+    pub model_voices: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 #[derive(Clone, Serialize)]
@@ -141,6 +147,50 @@ impl ModelStore {
         find_persona(self.settings_file.parent()?, &self.current_dir()?)
     }
 
+    /// Name of the current model's folder.
+    pub fn folder_name(&self) -> Option<String> {
+        let s = self.settings();
+        Some(s.model_path.as_ref()?.parent()?.file_name()?.to_string_lossy().into_owned())
+    }
+
+    /// The voice for the current model and whether it was picked in the tray:
+    /// the tray pick, else the folder's own voice, else `voice`, else af_heart.
+    pub fn voice(&self) -> (String, bool) {
+        let s = self.settings();
+        if let Some(v) = self
+            .folder_name()
+            .and_then(|f| s.model_voices.as_ref()?.get(&f)?.as_str().map(str::to_string))
+            .filter(|v| crate::voices::is_voice(v))
+        {
+            return (v, true);
+        }
+        let v = self
+            .current_dir()
+            .and_then(|d| crate::voices::folder_voice(&d))
+            .or(s.voice.filter(|v| !v.trim().is_empty()))
+            .unwrap_or_else(|| crate::voices::DEFAULT.into());
+        (v, false)
+    }
+
+    /// Picks (Some) or clears (None) the tray voice for the current model.
+    pub fn pick_voice(&self, voice: Option<&str>) {
+        let folder = self.folder_name();
+        self.update(|s| match folder {
+            Some(f) => {
+                let map = s.model_voices.get_or_insert_with(Default::default);
+                match voice {
+                    Some(v) => {
+                        map.insert(f, v.into());
+                    }
+                    None => {
+                        map.remove(&f);
+                    }
+                }
+            }
+            None => s.voice = voice.map(str::to_string),
+        });
+    }
+
     /// The folder holding the current model's .model3.json.
     pub fn current_dir(&self) -> Option<PathBuf> {
         let inner = self.inner.lock().unwrap();
@@ -191,6 +241,39 @@ impl ModelStore {
     fn dir(&self) -> Option<PathBuf> {
         self.current_dir()
     }
+}
+
+/// Motion and expression files in a model folder (relative paths with "/"), so
+/// files the .model3.json doesn't list (common with VTube Studio models) can be
+/// offered too. Looks three folders deep and stops at 500 files.
+pub fn list_model_files(dir: &Path) -> Vec<String> {
+    fn walk(root: &Path, dir: &Path, depth: u32, out: &mut Vec<String>) {
+        let Ok(entries) = fs::read_dir(dir) else { return };
+        let mut entries: Vec<_> = entries.flatten().collect();
+        entries.sort_by_key(|e| e.file_name());
+        for e in entries {
+            if out.len() >= 500 {
+                return;
+            }
+            let path = e.path();
+            if path.is_dir() {
+                if depth < 3 {
+                    walk(root, &path, depth + 1, out);
+                }
+                continue;
+            }
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            if name.ends_with(".motion3.json") || name.ends_with(".exp3.json") {
+                if let Ok(rel) = path.strip_prefix(root) {
+                    let parts: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+                    out.push(parts.join("/"));
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, dir, 0, &mut out);
+    out
 }
 
 /// Maps a request path onto a file inside `dir`, refusing anything that escapes it.
@@ -246,6 +329,16 @@ mod tests {
     }
 
     #[test]
+    fn lists_motion_and_expression_files() {
+        let dir = temp_model();
+        fs::write(dir.join("Love eye.exp3.json"), "{}").unwrap();
+        let files = list_model_files(&dir);
+        assert!(files.contains(&"motions/00_Wait_01.motion3.json".to_string()), "{files:?}");
+        assert!(files.contains(&"Love eye.exp3.json".to_string()), "{files:?}");
+        assert!(!files.iter().any(|f| f.ends_with("model3.json") && !f.ends_with("motion3.json")));
+    }
+
+    #[test]
     fn serves_files_inside_the_model_folder() {
         let dir = temp_model();
         assert!(resolve(&dir, "/3/m.model3.json").is_some());
@@ -283,9 +376,27 @@ pub fn find_persona(config_dir: &Path, model_dir: &Path) -> Option<String> {
     candidates.iter().find_map(|p| {
         let text = fs::read_to_string(p).ok()?;
         // Notepad may save a byte-order mark.
-        let text = text.trim_start_matches('\u{feff}').trim();
+        let text = strip_front_matter(text.trim_start_matches('\u{feff}')).trim();
         (!text.is_empty()).then(|| text.to_string())
     })
+}
+
+/// Drops a `---` front matter block at the top (settings such as `voice:`, read by
+/// `voices::folder_voice`), so only the character description reaches Claude.
+fn strip_front_matter(text: &str) -> &str {
+    let mut lines = text.split_inclusive('\n');
+    if lines.next().map(str::trim) != Some("---") {
+        return text;
+    }
+    let mut offset = text.split_inclusive('\n').next().map_or(0, str::len);
+    for line in lines {
+        offset += line.len();
+        if line.trim() == "---" {
+            return &text[offset..];
+        }
+    }
+    // No closing line: not front matter after all.
+    text
 }
 
 pub fn name_from_folder(folder: &str) -> Option<String> {
@@ -318,6 +429,12 @@ mod persona_tests {
 
         fs::write(model.join("persona.md"), "\u{feff}  From the model folder.\n").unwrap();
         assert_eq!(find_persona(&config, &model).as_deref(), Some("From the model folder."));
+
+        fs::write(model.join("persona.md"), "---\r\nvoice: af_bella\r\n---\r\nFrom the model folder.\r\n").unwrap();
+        assert_eq!(find_persona(&config, &model).as_deref(), Some("From the model folder."));
+        fs::write(model.join("persona.md"), "---\nnot closed\n").unwrap();
+        assert_eq!(find_persona(&config, &model).as_deref(), Some("---\nnot closed"));
+        fs::write(model.join("persona.md"), "From the model folder.").unwrap();
 
         fs::write(config.join("personas").join("Nicole.md"), "From the config folder.").unwrap();
         assert_eq!(find_persona(&config, &model).as_deref(), Some("From the config folder."));

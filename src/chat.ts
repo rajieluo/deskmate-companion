@@ -19,6 +19,7 @@ export class ChatUI {
   private micButton = $<HTMLButtonElement>("mic");
   private muteButton = $<HTMLButtonElement>("mute");
   private historyButton = $<HTMLButtonElement>("history-btn");
+  private hotkeys = { talk: "", listen: "", mute: "" };
   private mic = new Mic();
   private transcribing = false;
   /** The reply being shown; 0 while a send is in flight and its number isn't known yet. */
@@ -47,7 +48,11 @@ export class ChatUI {
     host.onSttProgress((p) => this.say(`Downloading the speech model (first time only)… ${Math.floor(p)}%`));
     this.muteButton.addEventListener("click", () => host.setVoiceEnabled(!this.voice.enabled));
     host.onVoiceChanged((on) => this.showMuted(!on));
-    void host.chatStatus().then((s) => this.showMuted(!s.voice_enabled));
+    void host.chatStatus().then((s) => {
+      this.hotkeys = s.hotkeys;
+      this.micButton.title = s.hotkeys.listen ? `Speak (${s.hotkeys.listen})` : "Speak";
+      this.showMuted(!s.voice_enabled);
+    });
     this.historyButton.addEventListener("click", () => host.historyOpen());
     this.micButton.addEventListener("click", () => {
       if (this.mic.recording) this.mic.stop();
@@ -286,7 +291,8 @@ export class ChatUI {
   private showMuted(muted: boolean) {
     this.muteButton.classList.toggle("muted", muted);
     this.muteButton.setAttribute("aria-pressed", String(muted));
-    this.muteButton.title = muted ? "Unmute her voice (Ctrl+Shift+U)" : "Mute her voice (Ctrl+Shift+U)";
+    const key = this.hotkeys.mute ? ` (${this.hotkeys.mute})` : "";
+    this.muteButton.title = `${muted ? "Unmute" : "Mute"} her voice${key}`;
   }
 
   get characterName() {

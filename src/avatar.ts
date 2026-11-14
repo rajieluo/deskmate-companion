@@ -1,5 +1,6 @@
 // The Live2D character: loading, framing, motions, gaze and pixel hit-testing.
 import { detectLookParams, type LookParams } from "./look";
+import { blend, type ExpressionParam, type ModelActions, parseExpression, withFolderFiles } from "./poses";
 import * as PIXI from "pixi.js";
 import { Live2DModel, MotionPriority } from "pixi-live2d-display/cubism4";
 import { alphaBounds, boxToCrop, FULL_CROP, layout, type Crop } from "./fit";
@@ -57,11 +58,13 @@ export class Avatar {
     url: string,
     look: Partial<Record<string, string>> = {},
     params: Record<string, number> = {},
+    files: string[] = [],
   ): Promise<MotionSummary> {
     const id = ++this.loadId;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Could not read ${url} (HTTP ${res.status})`);
-    const json = (await res.json()) as ModelSettingsJson;
+    const raw = (await res.json()) as ModelSettingsJson;
+    const { json, actions } = withFolderFiles(raw, files);
     const { settings, summary } = regroupMotions(json);
 
     const model = await Live2DModel.from({ ...settings, url } as never, { autoInteract: false });
@@ -76,6 +79,9 @@ export class Avatar {
     }
     this.model = model;
     this.groups = settings.FileReferences.Motions ?? {};
+    this.actions = actions;
+    this.modelUrl = url;
+    this.activeExpressions.clear();
     this.lipSyncIds = lipSyncIds(json);
     const held = Object.entries(params).filter(([, v]) => typeof v === "number");
     model.internalModel.on("beforeModelUpdate", () => {
@@ -83,6 +89,7 @@ export class Avatar {
         const core = model.internalModel.coreModel as unknown as { setParameterValueById(id: string, v: number): void };
         for (const [id, v] of held) core.setParameterValueById(id, v);
       }
+      this.applyExpressions();
       this.applyMouth();
     });
     this.lookParams = applyLookParams(model, look);
@@ -91,13 +98,27 @@ export class Avatar {
     this.app.stage.addChild(model);
 
     await this.measureCrop();
+    // The textures are on the GPU once measureCrop has drawn the model.
+    limitMipmaps(model, this.app.renderer as PIXI.Renderer);
     this.place();
     model.alpha = 1;
     return summary;
   }
 
   /** Draws the whole model canvas once and records where the visible figure is. */
+  /** True while measureCrop has the model at its measuring position; place() waits. */
+  private measuring = false;
+
   private async measureCrop() {
+    this.measuring = true;
+    try {
+      await this.measureCropInner();
+    } finally {
+      this.measuring = false;
+    }
+  }
+
+  private async measureCropInner() {
     const model = this.model!;
     const { width: vw, height: vh } = this.app.screen;
     const nw = model.internalModel.width;
@@ -144,7 +165,9 @@ export class Avatar {
 
   place() {
     const model = this.model;
-    if (!model) return;
+    // A toggle (fade, zoom) arriving mid-measurement would move the model and spoil
+    // the crop; load() calls place() again once measuring is done.
+    if (!model || this.measuring) return;
     const { width: vw, height: vh } = this.app.screen;
     const p = layout(this.crop, model.internalModel.width, model.internalModel.height, vw, vh, {
       zoom: this.zoom,
@@ -203,6 +226,45 @@ export class Avatar {
     const px = new Uint8Array(4);
     gl.readPixels(Math.floor(x), h - 1 - Math.floor(y), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
     return px[3] > 16;
+  }
+
+  /** Motions and expressions the current model has, for the picker. */
+  actions: ModelActions = { motions: [], expressions: [] };
+  private modelUrl = "";
+  /** Expressions toggled on, by file: they stack and stay until toggled off. */
+  private activeExpressions = new Map<string, ExpressionParam[]>();
+
+  /** Plays one of the model's motions by group and index. */
+  playMotion(group: string, index: number) {
+    void this.model?.motion(group, index, MotionPriority.FORCE);
+  }
+
+  isExpressionOn(file: string) {
+    return this.activeExpressions.has(file);
+  }
+
+  /** Turns an expression (pose, eye style, prop...) on or off. */
+  async toggleExpression(file: string, on = !this.activeExpressions.has(file)): Promise<boolean> {
+    if (!on) {
+      this.activeExpressions.delete(file);
+      return false;
+    }
+    const url = new URL(file.split("/").map(encodeURIComponent).join("/"), this.modelUrl).href;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Could not read ${file} (HTTP ${res.status})`);
+    this.activeExpressions.set(file, parseExpression(await res.json()));
+    return true;
+  }
+
+  private applyExpressions() {
+    if (!this.activeExpressions.size || !this.model) return;
+    const core = this.model.internalModel.coreModel as unknown as {
+      getParameterValueById(id: string): number;
+      setParameterValueById(id: string, v: number): void;
+    };
+    for (const params of this.activeExpressions.values()) {
+      for (const p of params) core.setParameterValueById(p.id, blend(core.getParameterValueById(p.id), p));
+    }
   }
 
   /** Plays the body motion for an emotion (and its face overlay when there is no body motion). */
@@ -316,6 +378,27 @@ function applyLookParams(model: Live2DModel, look: Partial<Record<string, string
   });
   console.info("[avatar] mouse-follow parameters", found);
   return found;
+}
+
+/**
+ * Caps how far the model's textures are mipmapped. Live2D textures are atlases
+ * with parts packed close together; in the small mip levels a texel spans
+ * several neighbouring parts, so at desktop size their colours bleed into each
+ * other. On Nicole that drew faint dark lines under her closed mouth. Level 2
+ * (a quarter of full size) still smooths the minified figure without the bleed.
+ */
+export const MAX_MIP_LEVEL = 2;
+
+function limitMipmaps(model: Live2DModel, renderer: PIXI.Renderer) {
+  const gl = renderer.gl as WebGL2RenderingContext;
+  if (!(typeof WebGL2RenderingContext !== "undefined" && gl instanceof WebGL2RenderingContext)) return;
+  for (const texture of model.textures) {
+    const base = texture.baseTexture;
+    if (!base._glTextures[renderer.CONTEXT_UID]) continue;
+    // Bind through Pixi so its record of the bound texture stays right.
+    renderer.texture.bind(base, 0);
+    gl.texParameterf(gl.TEXTURE_2D, gl.TEXTURE_MAX_LOD, MAX_MIP_LEVEL);
+  }
 }
 
 /** Mouth parameter ids: the model's LipSync group, or the standard names. */

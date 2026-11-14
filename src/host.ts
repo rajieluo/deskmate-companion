@@ -92,14 +92,18 @@ export async function resizeWindow(factor: number) {
   const w = getCurrentWindow();
   const scale = await w.scaleFactor();
   const size = (await w.innerSize()).toLogical(scale);
-  const width = Math.round(Math.min(1400, Math.max(160, size.width * factor)));
-  const height = Math.round((width * size.height) / size.width);
+  const width = Math.round(Math.min(1400, Math.max(200, size.width * factor)));
+  // Keep the default 380x720 shape rather than the current one, so a squashed
+  // window (it once got saved as 160x28, hiding her) can't stay squashed.
+  const height = Math.round((width * 720) / 380);
   await w.setSize(new LogicalSize(width, height));
 }
 
 // --- Claude chat (runs on the Rust side; see src-tauri/src/chat.rs).
 
 export interface ChatStatus {
+  /** Global hotkey labels; "" when unset or taken by another app. */
+  hotkeys: { talk: string; listen: string; mute: string };
   has_key: boolean;
   name: string;
   model: string;
@@ -167,6 +171,13 @@ export function setVoiceEnabled(on: boolean) {
 
 const browserVoiceListeners: ((on: boolean) => void)[] = [];
 
+/** Motion and expression files in the current model's folder (relative paths). */
+export async function modelFiles(): Promise<string[]> {
+  if (inTauri) return invoke<string[]>("model_files").catch(() => []);
+  // Browser dev mode: ?files=a.exp3.json,b.motion3.json
+  return (new URLSearchParams(location.search).get("files") ?? "").split(",").filter(Boolean);
+}
+
 /** Writes a line to the app's log file (and the console). */
 export function log(level: "info" | "warn" | "error", message: string) {
   (level === "info" ? console.info : level === "warn" ? console.warn : console.error)(message);
@@ -175,7 +186,7 @@ export function log(level: "info" | "warn" | "error", message: string) {
 
 export async function chatStatus(): Promise<ChatStatus> {
   if (!inTauri) {
-    return { has_key: true, name: "Aqua", model: "demo", voice_enabled: true, follow_mouse: true, fade_bottom: true, voice: "af_heart", voice_speed: 1, voice_device: "cpu", brain: "api", claude_code_folder: null };
+    return { hotkeys: { talk: "Ctrl+Shift+Space", listen: "Ctrl+Alt+M", mute: "Ctrl+Alt+U" }, has_key: true, name: "Aqua", model: "demo", voice_enabled: true, follow_mouse: true, fade_bottom: true, voice: "af_heart", voice_speed: 1, voice_device: "cpu", brain: "api", claude_code_folder: null };
   }
   return invoke<ChatStatus>("chat_status");
 }
@@ -227,6 +238,11 @@ export function onFadeBottomChanged(cb: (on: boolean) => void) {
 
 export function onFollowMouseChanged(cb: (on: boolean) => void) {
   if (inTauri) void listen<boolean>("follow-mouse-changed", (e) => cb(e.payload));
+}
+
+/** The tray picked a voice (or the model changed). `sample`: say a line in it. */
+export function onVoicePicked(cb: (voice: string, sample: boolean) => void) {
+  if (inTauri) void listen<{ voice: string; sample: boolean }>("voice-picked", (e) => cb(e.payload.voice, e.payload.sample));
 }
 
 export function onVoiceChanged(cb: (enabled: boolean) => void) {
