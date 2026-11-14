@@ -282,8 +282,11 @@ async fn chat_send<R: Runtime>(
         let turn = code.begin();
         let crew = app.state::<Arc<Crew>>().inner().clone();
         crew.start_polling(app.clone());
+        // The first mate answers in her character too. (With per-model personas, prefer the
+        // model's persona file over this setting.)
+        let persona = s.persona.clone().filter(|p| !p.trim().is_empty());
         tauri::async_runtime::spawn(async move {
-            match crew.send(&app, &name, &text).await {
+            match crew.send(&app, &name, &text, persona.as_deref()).await {
                 Ok(said) => {
                     let _ = app.emit("chat-delta", chat::Delta { turn, text: said });
                     let _ = app.emit("chat-done", chat::Done { turn, model: None, stop_reason: None });
