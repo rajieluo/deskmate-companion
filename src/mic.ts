@@ -18,10 +18,15 @@ export interface MicOptions {
 }
 
 const RATE = 16000;
+/** Audio kept either side of the speech, so soft word edges aren't clipped (ms). */
+const PAD_MS = 300;
 
 /** Tracks speech/silence from successive RMS readings. Separate from the audio code so it can be tested. */
 export class Endpointer {
   heardSpeech = false;
+  /** Where speech started and last ended (ms into the recording). */
+  speechStart = 0;
+  speechEnd = 0;
   private silentFor = 0;
   private elapsed = 0;
 
@@ -31,7 +36,9 @@ export class Endpointer {
   push(rms: number, ms: number): boolean {
     this.elapsed += ms;
     if (rms > this.o.threshold) {
+      if (!this.heardSpeech) this.speechStart = this.elapsed - ms;
       this.heardSpeech = true;
+      this.speechEnd = this.elapsed;
       this.silentFor = 0;
     } else {
       this.silentFor += ms;
@@ -54,7 +61,7 @@ export class Mic {
   }
 
   async record(options: MicOptions = {}): Promise<Recording> {
-    const o = { threshold: 0.015, silenceMs: 1200, noSpeechMs: 8000, maxMs: 30000, ...options };
+    const o = { threshold: 0.015, silenceMs: 750, noSpeechMs: 8000, maxMs: 30000, ...options };
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
@@ -74,12 +81,19 @@ export class Mic {
         stream.getTracks().forEach((t) => t.stop());
         void ctx.close();
         const total = chunks.reduce((n, c) => n + c.length, 0);
-        const samples = new Float32Array(total);
+        const all = new Float32Array(total);
         let offset = 0;
         for (const c of chunks) {
-          samples.set(c, offset);
+          all.set(c, offset);
           offset += c.length;
         }
+        // Silence before and after the speech only makes transcription slower.
+        const samples = end.heardSpeech
+          ? all.subarray(
+              Math.max(0, Math.floor(((end.speechStart - PAD_MS) / 1000) * RATE)),
+              Math.min(total, Math.ceil(((end.speechEnd + PAD_MS) / 1000) * RATE)),
+            )
+          : all;
         resolve({ samples, heardSpeech: end.heardSpeech });
       };
       this.stopFn = finish;

@@ -1,6 +1,14 @@
 // The poses & animations picker: a panel above the chat box listing the model's
-// expressions (toggle on/off, remembered per model) and motions (click to play).
+// expressions (toggle on/off, remembered per model) and motions (click to play),
+// with the voice speed and pitch sliders at the bottom.
 import type { Avatar } from "./avatar";
+
+export interface VoiceTuning {
+  readonly speed: number;
+  readonly pitch: number;
+  /** Called when a slider is let go. */
+  set(change: { speed?: number; pitch?: number }): void;
+}
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -30,7 +38,10 @@ export class PosePicker {
   private button = $<HTMLButtonElement>("poses-btn");
   private model = "";
 
-  constructor(private avatar: Avatar) {
+  constructor(
+    private avatar: Avatar,
+    private tuning?: VoiceTuning,
+  ) {
     this.button.addEventListener("click", () => (this.panel.hidden ? this.open() : this.close()));
     document.addEventListener("keydown", (e) => e.key === "Escape" && this.close());
     document.addEventListener("pointerdown", (e) => {
@@ -92,6 +103,32 @@ export class PosePicker {
     return b;
   }
 
+  private slider(label: string, value: number, min: number, max: number, onSet: (v: number) => void) {
+    const row = document.createElement("label");
+    row.className = "slider";
+    const name = document.createElement("span");
+    name.textContent = label;
+    const input = document.createElement("input");
+    input.type = "range";
+    input.min = String(min);
+    input.max = String(max);
+    input.step = "0.05";
+    input.value = String(value);
+    const readout = document.createElement("output");
+    const show = () => (readout.textContent = `${Number(input.value).toFixed(2)}×`);
+    show();
+    input.addEventListener("input", show);
+    input.addEventListener("change", () => onSet(Number(input.value)));
+    // Double-click puts it back to normal.
+    input.addEventListener("dblclick", () => {
+      input.value = "1";
+      show();
+      onSet(1);
+    });
+    row.append(name, input, readout);
+    return row;
+  }
+
   private render() {
     const { motions, expressions } = this.avatar.actions;
     this.panel.replaceChildren();
@@ -126,5 +163,16 @@ export class PosePicker {
     const mo = this.section("Animations", "This model has no animations.");
     for (const m of motions.filter((m) => !m.face)) mo.list.append(this.chip(m.label, () => this.avatar.playMotion(m.group, m.index)));
     mo.done();
+
+    const t = this.tuning;
+    if (t) {
+      const h = document.createElement("h3");
+      h.textContent = "Voice";
+      this.panel.append(
+        h,
+        this.slider("Speed", t.speed, 0.5, 2, (speed) => t.set({ speed })),
+        this.slider("Pitch", t.pitch, 0.75, 1.35, (pitch) => t.set({ pitch })),
+      );
+    }
   }
 }

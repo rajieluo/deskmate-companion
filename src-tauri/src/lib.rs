@@ -158,6 +158,7 @@ struct ChatStatus {
     fade_bottom: bool,
     voice: String,
     voice_speed: f32,
+    voice_pitch: f32,
     voice_device: String,
     /// "api", "claude_code" or "crew"
     brain: String,
@@ -227,6 +228,15 @@ fn set_voice_enabled<R: Runtime>(app: AppHandle<R>, on: bool) {
     set_voice(&app, on);
 }
 
+/// Saves the speed and pitch sliders from the poses panel.
+#[tauri::command]
+fn set_voice_tuning(store: State<'_, Arc<ModelStore>>, speed: f32, pitch: f32) {
+    store.update(|s| {
+        s.voice_speed = Some(speed.clamp(0.5, 2.0));
+        s.voice_pitch = Some(pitch.clamp(0.75, 1.35));
+    });
+}
+
 /// Motion and expression files in the current model's folder.
 #[tauri::command]
 fn model_files(store: State<'_, Arc<ModelStore>>) -> Vec<String> {
@@ -256,6 +266,7 @@ fn chat_status(store: State<'_, Arc<ModelStore>>, hotkeys: State<'_, Hotkeys>) -
         fade_bottom: s.fade_bottom.unwrap_or(true),
         voice: store.voice().0,
         voice_speed: s.voice_speed.unwrap_or(1.0).clamp(0.5, 2.0),
+        voice_pitch: s.voice_pitch.unwrap_or(1.0).clamp(0.75, 1.35),
         voice_device: s.voice_device.unwrap_or_else(|| "cpu".into()),
         brain: s.brain.unwrap_or_else(|| "api".into()),
         claude_code_folder: s.claude_code_folder.map(|p| p.display().to_string()),
@@ -834,7 +845,16 @@ pub fn run() {
 
             let hotkeys = register_hotkeys(app.handle());
             app.manage(hotkeys);
-            app.manage(Arc::new(Stt::default()));
+            let stt = Arc::new(Stt::default());
+            app.manage(stt.clone());
+            // Load an already-downloaded Whisper model now, so the first voice message
+            // doesn't wait for it.
+            if let (Ok(()), Ok((name, _, dir))) = (stt::check_cpu(), stt_settings(app.handle())) {
+                let path = stt::model_file(&dir, &name);
+                if path.is_file() {
+                    thread::spawn(move || stt.preload(&name, &path));
+                }
+            }
             app.manage(Arc::new(tts::Tts::default()));
             app.manage(Arc::new(History::new(app.path().app_data_dir()?)));
 
@@ -908,7 +928,8 @@ pub fn run() {
             history_read,
             history_clear,
             history_open,
-            set_voice_enabled
+            set_voice_enabled,
+            set_voice_tuning
         ])
         .run(tauri::generate_context!())
         .expect("error while running Desktop Assistant");
