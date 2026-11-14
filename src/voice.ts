@@ -2,8 +2,9 @@ import { log } from "./host";
 
 // Speaks reply text sentence by sentence and exposes a mouth-open level for lip sync.
 //
-// Sentences are synthesized one ahead of playback, so the next one is usually
-// ready by the time the current one finishes.
+// Every sentence is sent for synthesis as soon as it arrives, and each clip is
+// scheduled to start the moment the previous one ends, so there are no gaps
+// as long as synthesis keeps ahead of playback.
 
 export interface SpeechEngine {
   /** Starts loading the model early (optional). */
@@ -17,6 +18,7 @@ export class KokoroEngine implements SpeechEngine {
   private nextId = 0;
   private pending = new Map<number, { resolve: (v: { audio: Float32Array; rate: number }) => void; reject: (e: Error) => void }>();
   onStatus: (status: string) => void = () => {};
+  private timed = 0;
 
   /** "cpu" (WASM) or "gpu" (WebGPU). Read when the model first loads. */
   device: "cpu" | "gpu" = "cpu";
@@ -34,10 +36,18 @@ export class KokoroEngine implements SpeechEngine {
       if (m.type === "progress") this.onStatus(`Downloading voice… ${Math.round(m.progress)}%`);
       else if (m.type === "garbled") log("warn", "[voice] the GPU produced garbled audio; switched to the CPU");
       else if (m.type === "ready") {
-        log("info", `[voice] Kokoro running on ${m.device}`);
+        // Without cross-origin isolation onnxruntime runs on a single thread, which is
+        // slower than real time on many CPUs and leaves pauses between sentences.
+        log("info", `[voice] Kokoro running on ${m.device}; multi-threaded ${m.isolated} (${m.cores} cores)`);
         this.onStatus("");
       }
-      else if (m.type === "audio") this.pending.get(m.id)?.resolve({ audio: m.audio, rate: m.rate });
+      else if (m.type === "audio") {
+        if (this.timed++ < 3) {
+          const secs = m.audio.length / m.rate;
+          log("info", `[voice] ${secs.toFixed(1)} s of speech took ${(m.ms / 1000).toFixed(1)} s to make`);
+        }
+        this.pending.get(m.id)?.resolve({ audio: m.audio, rate: m.rate });
+      }
       else if (m.type === "error") {
         if (m.id === -1) this.onStatus(`Voice failed to load: ${m.message}`);
         log("error", `[voice] ${m.message}`);
@@ -85,7 +95,11 @@ export class Voice {
   private samples = new Float32Array(1024);
   private queue: Promise<{ audio: Float32Array; rate: number } | null>[] = [];
   private playing = false;
-  private source: AudioBufferSourceNode | null = null;
+  private sources = new Set<AudioBufferSourceNode>();
+  /** AudioContext time at which the last scheduled clip ends. */
+  private nextStart = 0;
+  /** Wakes the drain loop when a sentence is queued or speech stops. */
+  private wake: (() => void) | null = null;
   private generation = 0;
   private smoothed = 0;
 
@@ -115,6 +129,7 @@ export class Voice {
       return null;
     });
     this.queue.push(job);
+    this.wake?.();
     if (!this.playing) void this.drain(this.generation);
   }
 
@@ -122,37 +137,51 @@ export class Voice {
   stop() {
     this.generation++;
     this.queue = [];
-    try {
-      this.source?.stop();
-    } catch {
-      /* already stopped */
+    for (const src of this.sources) {
+      try {
+        src.stop();
+      } catch {
+        /* already stopped */
+      }
     }
-    this.source = null;
+    this.sources.clear();
+    this.nextStart = 0;
     this.playing = false;
+    this.wake?.();
   }
 
   private async drain(gen: number) {
     this.playing = true;
-    while (this.queue.length && gen === this.generation) {
-      const clip = await this.queue.shift()!;
-      if (!clip || gen !== this.generation) continue;
-      await this.play(clip);
+    while (gen === this.generation) {
+      if (this.queue.length) {
+        const clip = await this.queue.shift()!;
+        if (clip && gen === this.generation) this.schedule(clip);
+        continue;
+      }
+      if (!this.sources.size) break;
+      // Wait for the last clip to end, or for another sentence to arrive.
+      await new Promise<void>((resolve) => {
+        this.wake = resolve;
+        for (const src of this.sources) src.addEventListener("ended", () => resolve(), { once: true });
+      });
+      this.wake = null;
     }
     if (gen === this.generation) this.playing = false;
   }
 
-  private play({ audio, rate }: { audio: Float32Array; rate: number }) {
+  /** Starts a clip right after the one before it (or now, if nothing is playing). */
+  private schedule({ audio, rate }: { audio: Float32Array; rate: number }) {
     const ctx = this.audio();
     const buffer = ctx.createBuffer(1, audio.length, rate);
     buffer.copyToChannel(audio as Float32Array<ArrayBuffer>, 0);
     const src = ctx.createBufferSource();
     src.buffer = buffer;
     src.connect(this.analyser!);
-    this.source = src;
-    return new Promise<void>((resolve) => {
-      src.onended = () => resolve();
-      src.start();
-    });
+    const start = Math.max(ctx.currentTime + 0.01, this.nextStart);
+    this.nextStart = start + buffer.duration;
+    this.sources.add(src);
+    src.onended = () => this.sources.delete(src);
+    src.start(start);
   }
 
   /** Mouth openness 0..1 from the loudness of what's playing right now. */
