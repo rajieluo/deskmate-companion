@@ -421,6 +421,31 @@ fn sane_size(width: f64, height: f64) -> bool {
     width >= 150.0 && height >= 250.0
 }
 
+/// Moves the window so a `width` x `height` (logical) window fits inside its
+/// monitor's work area, e.g. after restoring a larger saved size.
+fn keep_on_screen<R: Runtime>(window: &WebviewWindow<R>, width: f64, height: f64) {
+    let monitor = window.current_monitor().ok().flatten().or_else(|| window.primary_monitor().ok().flatten());
+    let (Some(monitor), Ok(pos)) = (monitor, window.outer_position()) else { return };
+    let scale = monitor.scale_factor();
+    let area = monitor.work_area();
+    let size = ((width * scale).round() as i32, (height * scale).round() as i32);
+    let area = (area.position.x, area.position.y, area.size.width as i32, area.size.height as i32);
+    let (x, y) = clamp_into((pos.x, pos.y), size, area);
+    if (x, y) != (pos.x, pos.y) {
+        log::info!("moved the window from {},{} to {x},{y} to keep it on screen", pos.x, pos.y);
+        let _ = window.set_position(PhysicalPosition::new(x, y));
+    }
+}
+
+/// Top-left corner that keeps a `size` box inside `area` (x, y, width, height),
+/// pinned to the top-left when it is bigger than the area.
+fn clamp_into(pos: (i32, i32), size: (i32, i32), area: (i32, i32, i32, i32)) -> (i32, i32) {
+    let (ax, ay, aw, ah) = area;
+    let x = pos.0.min(ax + aw - size.0).max(ax);
+    let y = pos.1.min(ay + ah - size.1).max(ay);
+    (x, y)
+}
+
 fn reset_position<R: Runtime>(window: &WebviewWindow<R>) {
     if let (Ok(Some(monitor)), Ok(size)) = (window.primary_monitor(), window.outer_size()) {
         let area = monitor.work_area();
@@ -701,6 +726,7 @@ pub fn run() {
             let saved = app.state::<Arc<ModelStore>>().settings().window_size;
             if let Some([w, h]) = saved.filter(|[w, h]| sane_size(*w, *h)) {
                 let _ = window.set_size(tauri::LogicalSize::new(w, h));
+                keep_on_screen(&window, w, h);
             } else if let (Ok(size), Ok(scale)) = (window.inner_size(), window.scale_factor()) {
                 let size = size.to_logical::<f64>(scale);
                 if !sane_size(size.width, size.height) {
@@ -750,6 +776,21 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Desktop Assistant");
+}
+
+#[cfg(test)]
+mod clamp_tests {
+    use super::clamp_into;
+
+    #[test]
+    fn keeps_the_window_inside_the_work_area() {
+        let area = (0, 0, 1920, 1040);
+        assert_eq!(clamp_into((1500, 600), (400, 800), area), (1500, 240));
+        assert_eq!(clamp_into((1700, -50), (400, 800), area), (1520, 0));
+        assert_eq!(clamp_into((100, 100), (400, 800), area), (100, 100));
+        assert_eq!(clamp_into((100, 100), (400, 1200), area), (100, 0));
+        assert_eq!(clamp_into((-1000, 10), (400, 800), (-1920, 0, 1920, 1080)), (-1000, 10));
+    }
 }
 
 #[cfg(test)]
