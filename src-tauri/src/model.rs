@@ -33,9 +33,12 @@ pub struct Settings {
     pub voice: Option<String>,
     /// Speaking speed, 0.5 to 2. Default: 1.
     pub voice_speed: Option<f32>,
-    /// Where Kokoro runs: "cpu" (default, reliable) or "gpu" (WebGPU: faster, but
-    /// garbles the voice on some graphics drivers).
+    /// Where Kokoro runs: "cpu" (default, reliable) or "gpu" (DirectML in the app;
+    /// WebGPU in the slower built-in voice, which garbles on some graphics drivers).
     pub voice_device: Option<String>,
+    /// Voice model variant for the native voice: q8 (default, ~90 MB), q8f16,
+    /// fp16 or fp32 (~325 MB). Whichever runs fastest on this CPU.
+    pub voice_model: Option<String>,
     /// Whisper model for voice input: tiny.en, base.en (default), small.en, medium.en, or multilingual ones.
     pub stt_model: Option<String>,
     /// "api" (default): chat through the Claude API with an API key.

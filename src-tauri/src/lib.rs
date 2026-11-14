@@ -429,7 +429,12 @@ fn stt_settings<R: Runtime>(app: &AppHandle<R>) -> Result<(String, String, std::
 /// Loads the native voice (downloading its model the first time). Returns the thread count.
 #[tauri::command]
 async fn tts_prepare<R: Runtime>(app: AppHandle<R>, tts: State<'_, Arc<tts::Tts>>) -> Result<usize, String> {
-    tts.prepare(&app).await.inspect_err(|e| log::error!("native voice: {e}"))?;
+    let s = app.state::<Arc<ModelStore>>().settings();
+    let options = tts::Options {
+        variant: s.voice_model.unwrap_or_else(|| tts::DEFAULT_VARIANT.into()),
+        gpu: s.voice_device.as_deref() == Some("gpu"),
+    };
+    tts.prepare(&app, options).await.inspect_err(|e| log::error!("native voice: {e}"))?;
     Ok(tts::threads())
 }
 
@@ -442,7 +447,9 @@ async fn tts_synthesize(
     speed: f32,
 ) -> Result<tauri::ipc::Response, String> {
     let tts = tts.inner().clone();
-    let audio = tauri::async_runtime::spawn_blocking(move || tts.synthesize(ids, style, speed))
+    let _permit = tts.runs.acquire().await.map_err(|e| e.to_string())?;
+    let worker = tts.clone();
+    let audio = tauri::async_runtime::spawn_blocking(move || worker.synthesize(ids, style, speed))
         .await
         .map_err(|e| e.to_string())??;
     let bytes: Vec<u8> = audio.iter().flat_map(|s| s.to_le_bytes()).collect();
