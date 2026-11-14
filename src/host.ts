@@ -82,6 +82,11 @@ export function setClickThrough(on: boolean) {
   void getCurrentWindow().setIgnoreCursorEvents(on);
 }
 
+/** Pops up the tray's options menu at the cursor. */
+export function showMenu() {
+  if (inTauri) void invoke("show_menu").catch((e) => console.warn("[menu]", e));
+}
+
 export function startDrag() {
   if (inTauri) void getCurrentWindow().startDragging();
 }

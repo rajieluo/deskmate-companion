@@ -599,6 +599,16 @@ fn spawn_cursor_poller<R: Runtime>(window: WebviewWindow<R>) {
     });
 }
 
+/// The tray's options menu, also shown when the avatar is right-clicked.
+struct TrayMenu<R: Runtime>(Menu<R>);
+
+/// Shows the tray's options menu at the cursor, over the avatar window.
+#[tauri::command]
+fn show_menu<R: Runtime>(app: AppHandle<R>, window: tauri::Window<R>) -> Result<(), String> {
+    let menu = app.try_state::<TrayMenu<R>>().ok_or("menu not ready")?;
+    window.popup_menu(&menu.0).map_err(|e| e.to_string())
+}
+
 fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let choose = MenuItem::with_id(app, "choose", "Choose model…", true, None::<&str>)?;
     let reset = MenuItem::with_id(app, "reset", "Reset position", true, None::<&str>)?;
@@ -660,6 +670,9 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let sep2 = PredefinedMenuItem::separator(app)?;
     let menu =
         Menu::with_items(app, &[&talk, &listen, &voice, &voice_menu, &history_item, &forget, &sep3, &model_menu, &code, &code_folder, &crew, &crew_open, &key, &sep, &choose, &follow, &fade, &reset, &reload, &sep2, &quit])?;
+    // Kept so a right-click on the avatar can pop up the same menu; its
+    // clicks go through the tray's on_menu_event handler below.
+    app.manage(TrayMenu(menu.clone()));
 
     let mut tray = TrayIconBuilder::with_id("main")
         .tooltip("Desktop Assistant")
@@ -929,7 +942,8 @@ pub fn run() {
             history_clear,
             history_open,
             set_voice_enabled,
-            set_voice_tuning
+            set_voice_tuning,
+            show_menu
         ])
         .run(tauri::generate_context!())
         .expect("error while running Desktop Assistant");

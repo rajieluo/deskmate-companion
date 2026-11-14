@@ -149,6 +149,12 @@ canvas.addEventListener("mouseup", () => {
   if (press) chat.toggle();
   press = null;
 });
+// Right-click on her opens the same options menu as the tray icon,
+// instead of the browser's "Copy image / Save image" menu.
+canvas.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  host.showMenu();
+});
 
 // --- Ctrl + mouse wheel resizes the window (and the character with it).
 window.addEventListener(
