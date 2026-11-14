@@ -3,8 +3,10 @@
 //! The page still turns text into Kokoro's tokens and picks the voice's style
 //! vector (kokoro-js does that in a worker); this module only runs the model,
 //! which in the webview's WebAssembly build was slower than real time.
-//! onnxruntime.dll is shipped next to the app (from the onnxruntime-node npm
-//! package) and loaded at runtime. The model (~90 MB) is downloaded from
+//! onnxruntime.dll 1.31 is shipped next to the app (from the onnxruntime-node
+//! npm package, installed as the "onnxruntime-desktop" alias so it doesn't clash
+//! with the 1.21 copy transformers.js pulls in) and loaded at runtime. 1.21 ran
+//! the q8 model ~4x slower. The model (~90 MB) is downloaded from
 //! Hugging Face the first time it's needed and kept in the app's data folder.
 
 use std::{
