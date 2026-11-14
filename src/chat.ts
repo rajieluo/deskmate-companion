@@ -17,6 +17,8 @@ export class ChatUI {
   private keyForm = $<HTMLFormElement>("api-key");
   private keyInput = $<HTMLInputElement>("api-key-input");
   private micButton = $<HTMLButtonElement>("mic");
+  private muteButton = $<HTMLButtonElement>("mute");
+  private historyButton = $<HTMLButtonElement>("history-btn");
   private mic = new Mic();
   private transcribing = false;
   /** The reply being shown; 0 while a send is in flight and its number isn't known yet. */
@@ -43,6 +45,10 @@ export class ChatUI {
     host.onEvent("chat-reset", () => this.say("(I've forgotten our conversation.)", 4000));
     host.onEvent("start-listening", () => void this.listen());
     host.onSttProgress((p) => this.say(`Downloading the speech model (first time only)… ${Math.floor(p)}%`));
+    this.muteButton.addEventListener("click", () => host.setVoiceEnabled(!this.voice.enabled));
+    host.onVoiceChanged((on) => this.showMuted(!on));
+    void host.chatStatus().then((s) => this.showMuted(!s.voice_enabled));
+    this.historyButton.addEventListener("click", () => host.historyOpen());
     this.micButton.addEventListener("click", () => {
       if (this.mic.recording) this.mic.stop();
       else void this.listen();
@@ -160,6 +166,7 @@ export class ChatUI {
       this.askForKey();
       return;
     }
+    host.historyAppend("user", text);
     this.tags = new TagStream();
     this.sentences = new SentenceBuffer();
     this.voice.stop();
@@ -204,6 +211,7 @@ export class ChatUI {
     this.append(rest);
     for (const s of [...this.sentences.push(rest), ...this.sentences.flush()]) this.voice.say(speakable(s));
     this.bubble.classList.remove("thinking");
+    host.historyAppend("assistant", this.bubbleText.textContent ?? "");
     const words = (this.bubbleText.textContent ?? "").split(/\s+/).length;
     this.scheduleHide(Math.min(30000, 5000 + words * 350));
   }
@@ -273,6 +281,12 @@ export class ChatUI {
   /** Shows a status line (e.g. voice download progress); empty text hides it. */
   status(text: string) {
     if (text) this.say(text, 4000);
+  }
+
+  private showMuted(muted: boolean) {
+    this.muteButton.classList.toggle("muted", muted);
+    this.muteButton.setAttribute("aria-pressed", String(muted));
+    this.muteButton.title = muted ? "Unmute her voice (Ctrl+Shift+U)" : "Mute her voice (Ctrl+Shift+U)";
   }
 
   get characterName() {

@@ -12,6 +12,7 @@
 mod chat;
 mod claude_code;
 mod model;
+mod history;
 mod stt;
 
 use std::{sync::Arc, thread, time::Duration};
@@ -19,6 +20,7 @@ use std::{sync::Arc, thread, time::Duration};
 use chat::{Chat, ChatConfig};
 use claude_code::ClaudeCode;
 use model::{ModelInfo, ModelStore};
+use history::History;
 use stt::Stt;
 use serde::Serialize;
 use tauri::{
@@ -39,6 +41,8 @@ const MODEL_CHOICES: &[(&str, &str, &str)] = &[
 
 /// The Model submenu's items, kept so the check mark can move when one is picked.
 struct ModelMenu<R: Runtime>(Vec<CheckMenuItem<R>>);
+/// The tray's "Speak replies" item, so mute from the page or hotkey can update it.
+struct VoiceItem<R: Runtime>(CheckMenuItem<R>);
 
 #[derive(Clone, Serialize, PartialEq)]
 struct CursorEvent {
@@ -66,6 +70,66 @@ struct ChatStatus {
     /// "api" or "claude_code"
     brain: String,
     claude_code_folder: Option<String>,
+}
+
+/// Saves one chat message to the history file.
+#[tauri::command]
+fn history_append(
+    history: State<'_, Arc<History>>,
+    store: State<'_, Arc<ModelStore>>,
+    role: String,
+    text: String,
+) -> Result<(), String> {
+    let mode = store.settings().brain.unwrap_or_else(|| "api".into());
+    history.append(&role, &text, &store.character_name(), &mode)
+}
+
+#[tauri::command]
+fn history_read(history: State<'_, Arc<History>>) -> Vec<history::Entry> {
+    history.read()
+}
+
+#[tauri::command]
+fn history_clear(history: State<'_, Arc<History>>) -> Result<(), String> {
+    history.clear()
+}
+
+#[tauri::command]
+fn history_open<R: Runtime>(app: AppHandle<R>) {
+    open_history(&app);
+}
+
+/// Shows the Chat history window, creating it if needed.
+fn open_history<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(w) = app.get_webview_window("history") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+        let _ = w.emit("history-refresh", ());
+        return;
+    }
+    let built = tauri::WebviewWindowBuilder::new(app, "history", tauri::WebviewUrl::App("history.html".into()))
+        .title("Chat history")
+        .inner_size(560.0, 680.0)
+        .min_inner_size(360.0, 300.0)
+        .build();
+    if let Err(e) = built {
+        log::error!("couldn't open the history window: {e}");
+    }
+}
+
+/// Mutes or unmutes her voice, keeping the tray check, settings and page in step.
+fn set_voice<R: Runtime>(app: &AppHandle<R>, on: bool) {
+    app.state::<Arc<ModelStore>>().update(|s| s.voice_enabled = Some(on));
+    if let Some(item) = app.try_state::<VoiceItem<R>>() {
+        let _ = item.0.set_checked(on);
+    }
+    let _ = app.emit("voice-changed", on);
+}
+
+#[tauri::command]
+fn set_voice_enabled<R: Runtime>(app: AppHandle<R>, on: bool) {
+    set_voice(&app, on);
 }
 
 /// Lets the page write to the log file (diagnostics, errors).
@@ -299,7 +363,9 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let forget = MenuItem::with_id(app, "forget", "Forget conversation", true, None::<&str>)?;
     let key = MenuItem::with_id(app, "key", "Set API key…", true, None::<&str>)?;
     let voice_on = app.state::<Arc<ModelStore>>().settings().voice_enabled.unwrap_or(true);
-    let voice = CheckMenuItem::with_id(app, "voice", "Speak replies", true, voice_on, None::<&str>)?;
+    let voice = CheckMenuItem::with_id(app, "voice", "Speak replies (Ctrl+Shift+U mutes)", true, voice_on, None::<&str>)?;
+    app.manage(VoiceItem(voice.clone()));
+    let history_item = MenuItem::with_id(app, "history", "Chat history…", true, None::<&str>)?;
     let follow_on = app.state::<Arc<ModelStore>>().settings().follow_mouse.unwrap_or(true);
     let follow = CheckMenuItem::with_id(app, "follow", "Follow the mouse", true, follow_on, None::<&str>)?;
     let code_on = app.state::<Arc<ModelStore>>().settings().brain.as_deref() == Some("claude_code");
@@ -324,7 +390,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let menu =
-        Menu::with_items(app, &[&talk, &listen, &voice, &forget, &sep3, &model_menu, &code, &code_folder, &key, &sep, &choose, &follow, &reset, &reload, &sep2, &quit])?;
+        Menu::with_items(app, &[&talk, &listen, &voice, &history_item, &forget, &sep3, &model_menu, &code, &code_folder, &key, &sep, &choose, &follow, &reset, &reload, &sep2, &quit])?;
 
     let mut tray = TrayIconBuilder::with_id("main")
         .tooltip("Desktop Assistant")
@@ -346,11 +412,11 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 let _ = app.emit("chat-reset", ());
             }
             "voice" => {
-                let store = app.state::<Arc<ModelStore>>();
-                let on = !store.settings().voice_enabled.unwrap_or(true);
-                store.update(|s| s.voice_enabled = Some(on));
-                let _ = app.emit("voice-changed", on);
+                // The menu has already flipped its own check mark.
+                let on = !app.state::<Arc<ModelStore>>().settings().voice_enabled.unwrap_or(true);
+                set_voice(app, on);
             }
+            "history" => open_history(app),
             "follow" => {
                 let store = app.state::<Arc<ModelStore>>();
                 let on = !store.settings().follow_mouse.unwrap_or(true);
@@ -430,6 +496,9 @@ pub fn run() {
                     if event.state() == ShortcutState::Pressed {
                         if shortcut.key == Code::KeyM {
                             start_listening(app);
+                        } else if shortcut.key == Code::KeyU {
+                            let on = !app.state::<Arc<ModelStore>>().settings().voice_enabled.unwrap_or(true);
+                            set_voice(app, on);
                         } else {
                             open_chat(app);
                         }
@@ -460,12 +529,14 @@ pub fn run() {
 
             let talk = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
             let listen = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyM);
-            for shortcut in [talk, listen] {
+            let mute = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyU);
+            for shortcut in [talk, listen, mute] {
                 if let Err(e) = app.global_shortcut().register(shortcut) {
                     log::warn!("could not register {shortcut:?}: {e}");
                 }
             }
             app.manage(Arc::new(Stt::default()));
+            app.manage(Arc::new(History::new(app.path().app_data_dir()?)));
 
             build_tray(app.handle())?;
 
@@ -488,7 +559,12 @@ pub fn run() {
             stt_prepare,
             pick_claude_code_folder,
             transcribe,
-            page_log
+            page_log,
+            history_append,
+            history_read,
+            history_clear,
+            history_open,
+            set_voice_enabled
         ])
         .run(tauri::generate_context!())
         .expect("error while running Desktop Assistant");

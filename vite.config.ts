@@ -14,5 +14,7 @@ export default defineConfig({
   build: {
     target: "es2021",
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
+    // Two pages: the avatar window and the Chat history window.
+    rollupOptions: { input: { main: "index.html", history: "history.html" } },
   },
 });

@@ -126,7 +126,9 @@ body[data-brain="claude_code"] #chat input {
   border-color: #6f8cff;
 }
 
-#mic {
+#mic,
+#mute,
+#history-btn {
   flex: none;
   width: 38px;
   height: 38px;
@@ -139,6 +141,19 @@ body[data-brain="claude_code"] #chat input {
   display: grid;
   place-items: center;
   transition: transform 80ms linear;
+}
+
+#mute .off,
+#mute.muted .on {
+  display: none;
+}
+
+#mute.muted .off {
+  display: block;
+}
+
+#mute.muted {
+  color: #b0405a;
 }
 
 #mic.listening {

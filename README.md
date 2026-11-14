@@ -34,7 +34,9 @@ Every pull request also builds a Windows installer in CI; download it from the r
 - The first time you chat she asks for an [Anthropic API key](https://console.anthropic.com/settings/keys). It is stored in Windows Credential Manager, never in a file. `ANTHROPIC_API_KEY` in the environment also works. *Set API key…* in the tray changes it.
 - *Forget conversation* in the tray starts a fresh conversation.
 - **Talk to her out loud**: press the microphone button in the chat box, or **Ctrl+Shift+M** from anywhere. Speak, and she stops listening after a short pause. Your words are transcribed locally with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) and sent as a message. The first time, the Whisper model (`base.en`, about 140 MB) downloads into `%APPDATA%\com.rajieluo.desktopassistant\whisper\`. Windows may ask for microphone permission once.
-- She **speaks her replies** with [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), running locally, and her mouth follows the audio. The voice model (about 90 MB) downloads from Hugging Face the first time and is cached after that. It uses the GPU through WebGPU when available, otherwise the CPU. *Speak replies* in the tray turns the voice on or off.
+- She **speaks her replies** with [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), running locally, and her mouth follows the audio. The voice model (about 90 MB) downloads from Hugging Face the first time and is cached after that. It runs on the CPU by default (see `voice_device` below).
+- **Mute** her with the speaker button in the chat box, **Ctrl+Shift+U** from anywhere, or *Speak replies* in the tray. All three stay in step, and the choice is remembered.
+- **Chat history**: the clock button in the chat box, or *Chat history…* in the tray, opens a window with every message, grouped by day and searchable. Messages are saved to `%APPDATA%\com.rajieluo.desktopassistant\history.jsonl`; *Clear…* in that window deletes them.
 - **Ctrl + mouse wheel** over her makes the window bigger or smaller.
 - **Keys 1 to 7** (after clicking her) play happy, sad, angry, surprised, shy, thinking and proud, so you can check a model's motions.
 

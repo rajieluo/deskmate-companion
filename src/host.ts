@@ -122,6 +122,50 @@ export interface ChatHandlers {
 let browserTurn = 0;
 let browserHandlers: ChatHandlers | null = null;
 
+// --- Chat history (saved by the Rust side to history.jsonl in the app data folder).
+
+export interface HistoryEntry {
+  time: number;
+  role: "user" | "assistant";
+  text: string;
+  name: string;
+  mode: string;
+}
+
+const browserHistory: HistoryEntry[] = [];
+
+export function historyAppend(role: "user" | "assistant", text: string) {
+  if (!text.trim()) return;
+  if (inTauri) void invoke("history_append", { role, text }).catch((e) => console.warn("[history]", e));
+  else browserHistory.push({ time: Date.now(), role, text, name: "Aqua", mode: "api" });
+}
+
+export async function historyRead(): Promise<HistoryEntry[]> {
+  return inTauri ? invoke<HistoryEntry[]>("history_read") : [...browserHistory];
+}
+
+export async function historyClear(): Promise<void> {
+  if (inTauri) await invoke("history_clear");
+  else browserHistory.length = 0;
+}
+
+export function historyOpen() {
+  if (inTauri) void invoke("history_open");
+  else window.open("history.html", "_blank");
+}
+
+export function onHistoryRefresh(cb: () => void) {
+  if (inTauri) void listen("history-refresh", () => cb());
+}
+
+/** Mutes or unmutes her voice; the tray and settings follow. */
+export function setVoiceEnabled(on: boolean) {
+  if (inTauri) void invoke("set_voice_enabled", { on });
+  else browserVoiceListeners.forEach((cb) => cb(on));
+}
+
+const browserVoiceListeners: ((on: boolean) => void)[] = [];
+
 /** Writes a line to the app's log file (and the console). */
 export function log(level: "info" | "warn" | "error", message: string) {
   (level === "info" ? console.info : level === "warn" ? console.warn : console.error)(message);
@@ -182,6 +226,7 @@ export function onFollowMouseChanged(cb: (on: boolean) => void) {
 
 export function onVoiceChanged(cb: (enabled: boolean) => void) {
   if (inTauri) void listen<boolean>("voice-changed", (e) => cb(e.payload));
+  else browserVoiceListeners.push(cb);
 }
 
 // --- Voice input (whisper.cpp on the Rust side; see src-tauri/src/stt.rs).
