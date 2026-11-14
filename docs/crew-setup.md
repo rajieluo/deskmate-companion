@@ -32,8 +32,9 @@ There are two ways to run firstmate on Windows:
    `echo auto > ~/Documents/projects/firstmate/config/claude-permission-mode`.
 4. Do the guide's one-time [launch steps](https://github.com/EvanBatten/firstmate-for-windows/blob/main/platform/windows/INSTALL.md#launch)
    (Herdr's shell and the `claude` profile line).
-5. **Open crew terminal** in the tray now starts Herdr in the firstmate folder. Type
-   `claude` in its pane to start the first mate, then continue with step 5 below.
+5. **Open crew terminal** in the tray starts Herdr in the firstmate folder and, when
+   the first mate isn't already running, types `claude` into its first pane to start it.
+   (If that doesn't happen, type `claude` there yourself.) Then continue with step 5 below.
 
 The rest of this guide is the WSL route.
 
