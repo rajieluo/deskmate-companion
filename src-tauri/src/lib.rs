@@ -14,6 +14,7 @@ mod claude_code;
 mod model;
 mod history;
 mod stt;
+mod voices;
 
 use std::{sync::Arc, thread, time::Duration};
 
@@ -107,6 +108,21 @@ const MODEL_CHOICES: &[(&str, &str, &str)] = &[
 struct ModelMenu<R: Runtime>(Vec<CheckMenuItem<R>>);
 /// The tray's "Speak replies" item, so mute from the page or hotkey can update it.
 struct VoiceItem<R: Runtime>(CheckMenuItem<R>);
+/// The tray's "Voice" submenu: "the model's own voice" item, then (id, item) per voice.
+struct VoiceMenu<R: Runtime>(CheckMenuItem<R>, Vec<(String, CheckMenuItem<R>)>);
+
+/// Ticks the current model's voice in the tray and tells the page to use it.
+fn sync_voice<R: Runtime>(app: &AppHandle<R>, sample: bool) {
+    let (voice, picked) = app.state::<Arc<ModelStore>>().voice();
+    if let Some(menu) = app.try_state::<VoiceMenu<R>>() {
+        let _ = menu.0.set_checked(!picked);
+        for (id, item) in &menu.1 {
+            let _ = item.set_checked(*id == voice);
+        }
+    }
+    log::info!("voice {voice}, {} ({})", voices::name(&voice), if picked { "picked in the tray" } else { "model default" });
+    let _ = app.emit("voice-picked", serde_json::json!({ "voice": voice, "sample": sample }));
+}
 
 #[derive(Clone, Serialize, PartialEq)]
 struct CursorEvent {
@@ -229,7 +245,7 @@ fn chat_status(store: State<'_, Arc<ModelStore>>, hotkeys: State<'_, Hotkeys>) -
         voice_enabled: s.voice_enabled.unwrap_or(true),
         follow_mouse: s.follow_mouse.unwrap_or(true),
         fade_bottom: s.fade_bottom.unwrap_or(true),
-        voice: s.voice.unwrap_or_else(|| "af_heart".into()),
+        voice: store.voice().0,
         voice_speed: s.voice_speed.unwrap_or(1.0).clamp(0.5, 2.0),
         voice_device: s.voice_device.unwrap_or_else(|| "cpu".into()),
         brain: s.brain.unwrap_or_else(|| "api".into()),
@@ -396,6 +412,7 @@ fn choose_model<R: Runtime>(app: &AppHandle<R>) -> Result<Option<ModelInfo>, Str
     let path = picked.into_path().map_err(|e| e.to_string())?;
     let info = store.set(&path)?;
     let _ = app.emit("model-changed", &info);
+    sync_voice(app, false);
     Ok(Some(info))
 }
 
@@ -465,12 +482,31 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         model_items.iter().map(|i| i as &dyn tauri::menu::IsMenuItem<R>).collect();
     let model_menu = Submenu::with_items(app, "Chat model", true, &model_refs)?;
     app.manage(ModelMenu(model_items.clone()));
+    let (current_voice, voice_picked) = app.state::<Arc<ModelStore>>().voice();
+    let own_voice = CheckMenuItem::with_id(app, "voice:default", "Model's own voice", true, !voice_picked, None::<&str>)?;
+    let mut voice_items = Vec::new();
+    let mut group_menus = Vec::new();
+    for group in voices::GROUPS {
+        let mut items = Vec::new();
+        for (id, name, _) in voices::VOICES.iter().filter(|(_, _, g)| g == group) {
+            let item = CheckMenuItem::with_id(app, format!("voice:{id}"), *name, true, current_voice == *id, None::<&str>)?;
+            voice_items.push((id.to_string(), item.clone()));
+            items.push(item);
+        }
+        let refs: Vec<&dyn tauri::menu::IsMenuItem<R>> = items.iter().map(|i| i as &dyn tauri::menu::IsMenuItem<R>).collect();
+        group_menus.push(Submenu::with_items(app, *group, true, &refs)?);
+    }
+    let voice_sep = PredefinedMenuItem::separator(app)?;
+    let mut voice_refs: Vec<&dyn tauri::menu::IsMenuItem<R>> = vec![&own_voice, &voice_sep];
+    voice_refs.extend(group_menus.iter().map(|m| m as &dyn tauri::menu::IsMenuItem<R>));
+    let voice_menu = Submenu::with_items(app, "Voice", true, &voice_refs)?;
+    app.manage(VoiceMenu(own_voice.clone(), voice_items));
     let reload = MenuItem::with_id(app, "reload", "Reload", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let menu =
-        Menu::with_items(app, &[&talk, &listen, &voice, &history_item, &forget, &sep3, &model_menu, &code, &code_folder, &key, &sep, &choose, &follow, &fade, &reset, &reload, &sep2, &quit])?;
+        Menu::with_items(app, &[&talk, &listen, &voice, &voice_menu, &history_item, &forget, &sep3, &model_menu, &code, &code_folder, &key, &sep, &choose, &follow, &fade, &reset, &reload, &sep2, &quit])?;
 
     let mut tray = TrayIconBuilder::with_id("main")
         .tooltip("Desktop Assistant")
@@ -544,6 +580,17 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 }
             }
             "quit" => app.exit(0),
+            "voice:default" => {
+                app.state::<Arc<ModelStore>>().pick_voice(None);
+                sync_voice(app, true);
+            }
+            id if id.starts_with("voice:") => {
+                let voice = id.trim_start_matches("voice:");
+                if voices::is_voice(voice) {
+                    app.state::<Arc<ModelStore>>().pick_voice(Some(voice));
+                }
+                sync_voice(app, true);
+            }
             id if id.starts_with("model:") => {
                 let model = id.trim_start_matches("model:").to_string();
                 app.state::<Arc<ModelStore>>().update(|s| s.chat_model = Some(model.clone()));

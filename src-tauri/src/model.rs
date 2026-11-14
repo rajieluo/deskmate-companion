@@ -61,6 +61,9 @@ pub struct Settings {
     pub fade_bottom: Option<bool>,
     /// Head and eyes follow the mouse cursor. Default: true.
     pub follow_mouse: Option<bool>,
+    /// Voice picked in the tray for a model, keyed by folder name, e.g. {"Nicole": "af_nicole"}.
+    /// Wins over the folder's own voice.txt / persona.md and over `voice`.
+    pub model_voices: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 #[derive(Clone, Serialize)]
@@ -137,6 +140,50 @@ impl ModelStore {
                 name_from_folder(&folder)
             })
             .unwrap_or_else(|| "Assistant".into())
+    }
+
+    /// Name of the current model's folder.
+    pub fn folder_name(&self) -> Option<String> {
+        let s = self.settings();
+        Some(s.model_path.as_ref()?.parent()?.file_name()?.to_string_lossy().into_owned())
+    }
+
+    /// The voice for the current model and whether it was picked in the tray:
+    /// the tray pick, else the folder's own voice, else `voice`, else af_heart.
+    pub fn voice(&self) -> (String, bool) {
+        let s = self.settings();
+        if let Some(v) = self
+            .folder_name()
+            .and_then(|f| s.model_voices.as_ref()?.get(&f)?.as_str().map(str::to_string))
+            .filter(|v| crate::voices::is_voice(v))
+        {
+            return (v, true);
+        }
+        let v = self
+            .current_dir()
+            .and_then(|d| crate::voices::folder_voice(&d))
+            .or(s.voice.filter(|v| !v.trim().is_empty()))
+            .unwrap_or_else(|| crate::voices::DEFAULT.into());
+        (v, false)
+    }
+
+    /// Picks (Some) or clears (None) the tray voice for the current model.
+    pub fn pick_voice(&self, voice: Option<&str>) {
+        let folder = self.folder_name();
+        self.update(|s| match folder {
+            Some(f) => {
+                let map = s.model_voices.get_or_insert_with(Default::default);
+                match voice {
+                    Some(v) => {
+                        map.insert(f, v.into());
+                    }
+                    None => {
+                        map.remove(&f);
+                    }
+                }
+            }
+            None => s.voice = voice.map(str::to_string),
+        });
     }
 
     /// The folder holding the current model's .model3.json.

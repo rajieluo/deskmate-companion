@@ -240,6 +240,11 @@ export function onFollowMouseChanged(cb: (on: boolean) => void) {
   if (inTauri) void listen<boolean>("follow-mouse-changed", (e) => cb(e.payload));
 }
 
+/** The tray picked a voice (or the model changed). `sample`: say a line in it. */
+export function onVoicePicked(cb: (voice: string, sample: boolean) => void) {
+  if (inTauri) void listen<{ voice: string; sample: boolean }>("voice-picked", (e) => cb(e.payload.voice, e.payload.sample));
+}
+
 export function onVoiceChanged(cb: (enabled: boolean) => void) {
   if (inTauri) void listen<boolean>("voice-changed", (e) => cb(e.payload));
   else browserVoiceListeners.push(cb);

@@ -31,6 +31,13 @@ void host.chatStatus().then((s) => {
 });
 host.onFollowMouseChanged((on) => avatar.setFollowMouse(on));
 host.onFadeBottomChanged((on) => avatar.setFade(on));
+host.onVoicePicked((id, sample) => {
+  kokoro.voice = id;
+  if (sample && voice.enabled) {
+    voice.stop();
+    voice.say("Hi! This is how I sound now.");
+  }
+});
 host.onVoiceChanged((on) => {
   voice.enabled = on;
   if (!on) voice.stop();
