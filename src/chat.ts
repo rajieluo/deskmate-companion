@@ -80,12 +80,14 @@ export class ChatUI {
     this.form.hidden = false;
     this.form.setAttribute("data-hit", "");
     this.input.focus();
+    this.placeBubble();
   }
 
   close() {
     this.form.hidden = true;
     this.form.removeAttribute("data-hit");
     this.input.blur();
+    this.placeBubble();
   }
 
   /** Records one spoken message, transcribes it locally and sends it. */
@@ -182,6 +184,7 @@ export class ChatUI {
     this.keyForm.hidden = false;
     this.keyForm.setAttribute("data-hit", "");
     this.keyInput.focus();
+    this.placeBubble();
   }
 
   private append(text: string) {
@@ -194,7 +197,10 @@ export class ChatUI {
   private placeBubble() {
     const head = this.avatar.headTop();
     if (head === null) return;
-    const top = Math.max(8, head + 16 - this.bubble.offsetHeight);
+    // Keep clear of the text box and key field, which sit at the top of the window.
+    const below = [this.form, this.keyForm].filter((f) => !f.hidden).map((f) => f.offsetTop + f.offsetHeight);
+    const min = Math.max(8, ...below.map((b) => b + 8));
+    const top = Math.max(min, head + 16 - this.bubble.offsetHeight);
     this.bubble.style.top = `${Math.round(top)}px`;
   }
 
