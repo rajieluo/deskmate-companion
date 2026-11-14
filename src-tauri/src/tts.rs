@@ -107,22 +107,24 @@ async fn download<R: Runtime>(app: &AppHandle<R>, dir: &Path) -> Result<PathBuf,
         .await
         .and_then(|r| r.error_for_status())
         .map_err(|e| format!("Couldn't download the voice model: {e}"))?;
-    let total = response.content_length().unwrap_or(0) as f32;
+    let total = response.content_length().unwrap_or(0);
     let mut file = fs::File::create(&part).map_err(|e| e.to_string())?;
     let mut stream = response.bytes_stream();
-    let (mut done, mut last) = (0f32, -1i32);
+    // Count bytes as integers: an f32 loses whole bytes past 16 MB, which made a
+    // complete 92 MB download look short.
+    let (mut done, mut last) = (0u64, -1i32);
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("Download interrupted: {e}"))?;
         file.write_all(&chunk).map_err(|e| e.to_string())?;
-        done += chunk.len() as f32;
-        let percent = if total > 0.0 { done / total * 100.0 } else { 0.0 };
+        done += chunk.len() as u64;
+        let percent = if total > 0 { done as f32 / total as f32 * 100.0 } else { 0.0 };
         if percent as i32 != last {
             last = percent as i32;
             let _ = app.emit("tts-progress", crate::stt::Progress { percent });
         }
     }
     drop(file);
-    if total > 0.0 && done != total {
+    if total > 0 && done != total {
         let _ = fs::remove_file(&part);
         return Err(format!("Download of the voice model stopped early ({done} of {total} bytes)"));
     }
