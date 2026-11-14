@@ -64,6 +64,10 @@ pub struct Settings {
     /// Voice picked in the tray for a model, keyed by folder name, e.g. {"Nicole": "af_nicole"}.
     /// Wins over the folder's own voice.txt / persona.md and over `voice`.
     pub model_voices: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Last good size of the main window in logical pixels, [width, height].
+    /// Saved here rather than by the window-state plugin, which on Windows could
+    /// save the 160x28 minimized size.
+    pub window_size: Option<[f64; 2]>,
 }
 
 #[derive(Clone, Serialize)]

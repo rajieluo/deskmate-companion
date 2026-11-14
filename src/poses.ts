@@ -2,7 +2,7 @@
 // picker in the chat bar. VTube Studio models often keep expressions (poses like
 // "sitting position", "Love eye") as loose .exp3.json files the .model3.json
 // doesn't list, so the folder's files are included too.
-import { motionName, type ModelSettingsJson, type MotionRef } from "./motions";
+import { classifyMotion, motionName, type ModelSettingsJson, type MotionRef } from "./motions";
 
 export const EXTRA_GROUP = "Extra";
 
@@ -10,7 +10,12 @@ export interface MotionAction {
   label: string;
   group: string;
   index: number;
+  /** A face-only clip (e.g. Aqua's "Expression …" motions), listed apart from body animations. */
+  face: boolean;
 }
+
+const byLabel = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+const sortByLabel = <T extends { label: string }>(list: T[]) => list.sort((a, b) => byLabel.compare(a.label, b.label));
 
 export interface ExpressionAction {
   label: string;
@@ -62,13 +67,18 @@ export function withFolderFiles(json: ModelSettingsJson, files: string[]): { jso
       const key = norm(m.File);
       if (seen.has(key)) return;
       seen.add(key);
-      motionActions.push({ label: motionName(m.File).replace(/^\d+[_-]/, "").replace(/_/g, " "), group, index });
+      motionActions.push({
+        label: motionName(m.File).replace(/^\d+[_-]/, "").replace(/_/g, " "),
+        group,
+        index,
+        face: classifyMotion(m.File).layer === "face",
+      });
     });
   }
 
   return {
     json: { ...json, FileReferences: { ...json.FileReferences, Motions: groups } },
-    actions: { motions: motionActions, expressions },
+    actions: { motions: sortByLabel(motionActions), expressions: sortByLabel(expressions) },
   };
 }
 

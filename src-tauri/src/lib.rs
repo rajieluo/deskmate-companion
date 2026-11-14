@@ -416,6 +416,11 @@ fn choose_model<R: Runtime>(app: &AppHandle<R>) -> Result<Option<ModelInfo>, Str
     Ok(Some(info))
 }
 
+/// Big enough to show her; smaller sizes come from a minimized window.
+fn sane_size(width: f64, height: f64) -> bool {
+    width >= 150.0 && height >= 250.0
+}
+
 fn reset_position<R: Runtime>(window: &WebviewWindow<R>) {
     if let (Ok(Some(monitor)), Ok(size)) = (window.primary_monitor(), window.outer_size()) {
         let area = monitor.work_area();
@@ -631,7 +636,12 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(
+            // Size is kept in settings.json instead (see `window_size`).
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(tauri_plugin_window_state::StateFlags::all() & !tauri_plugin_window_state::StateFlags::SIZE)
+                .build(),
+        )
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -686,16 +696,36 @@ pub fn run() {
             if first_run {
                 reset_position(&window);
             }
-            // A restored size too small to show her (seen: 160x28) makes her vanish
-            // with no way back but deleting .window-state.json. Restore the default.
-            if let (Ok(size), Ok(scale)) = (window.inner_size(), window.scale_factor()) {
+            // Restore the last good size. A size too small to show her (seen: 160x28,
+            // the Windows minimized size) is never saved, and an old one is ignored.
+            let saved = app.state::<Arc<ModelStore>>().settings().window_size;
+            if let Some([w, h]) = saved.filter(|[w, h]| sane_size(*w, *h)) {
+                let _ = window.set_size(tauri::LogicalSize::new(w, h));
+            } else if let (Ok(size), Ok(scale)) = (window.inner_size(), window.scale_factor()) {
                 let size = size.to_logical::<f64>(scale);
-                if size.width < 150.0 || size.height < 250.0 {
+                if !sane_size(size.width, size.height) {
                     log::warn!("window size {}x{} is too small; resetting", size.width, size.height);
                     let _ = window.set_size(tauri::LogicalSize::new(380.0, 720.0));
                     reset_position(&window);
                 }
             }
+            let store = app.state::<Arc<ModelStore>>().inner().clone();
+            let w = window.clone();
+            window.on_window_event(move |event| {
+                if let tauri::WindowEvent::Resized(size) = event {
+                    if w.is_minimized().unwrap_or(false) {
+                        return;
+                    }
+                    let Ok(scale) = w.scale_factor() else { return };
+                    let size = size.to_logical::<f64>(scale);
+                    if sane_size(size.width, size.height) {
+                        let new = [size.width.round(), size.height.round()];
+                        if store.settings().window_size != Some(new) {
+                            store.update(|s| s.window_size = Some(new));
+                        }
+                    }
+                }
+            });
             spawn_cursor_poller(window);
             Ok(())
         })

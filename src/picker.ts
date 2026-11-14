@@ -116,8 +116,15 @@ export class PosePicker {
     }
     ex.done();
 
+    const faces = motions.filter((m) => m.face);
+    if (faces.length) {
+      const fa = this.section("Faces", "");
+      for (const m of faces) fa.list.append(this.chip(m.label, () => this.avatar.playMotion(m.group, m.index)));
+      fa.done();
+    }
+
     const mo = this.section("Animations", "This model has no animations.");
-    for (const m of motions) mo.list.append(this.chip(m.label, () => this.avatar.playMotion(m.group, m.index)));
+    for (const m of motions.filter((m) => !m.face)) mo.list.append(this.chip(m.label, () => this.avatar.playMotion(m.group, m.index)));
     mo.done();
   }
 }
