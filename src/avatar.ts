@@ -91,6 +91,8 @@ export class Avatar {
     this.app.stage.addChild(model);
 
     await this.measureCrop();
+    // The textures are on the GPU once measureCrop has drawn the model.
+    limitMipmaps(model, this.app.renderer as PIXI.Renderer);
     this.place();
     model.alpha = 1;
     return summary;
@@ -330,6 +332,27 @@ function applyLookParams(model: Live2DModel, look: Partial<Record<string, string
   });
   console.info("[avatar] mouse-follow parameters", found);
   return found;
+}
+
+/**
+ * Caps how far the model's textures are mipmapped. Live2D textures are atlases
+ * with parts packed close together; in the small mip levels a texel spans
+ * several neighbouring parts, so at desktop size their colours bleed into each
+ * other. On Nicole that drew faint dark lines under her closed mouth. Level 2
+ * (a quarter of full size) still smooths the minified figure without the bleed.
+ */
+export const MAX_MIP_LEVEL = 2;
+
+function limitMipmaps(model: Live2DModel, renderer: PIXI.Renderer) {
+  const gl = renderer.gl as WebGL2RenderingContext;
+  if (!(typeof WebGL2RenderingContext !== "undefined" && gl instanceof WebGL2RenderingContext)) return;
+  for (const texture of model.textures) {
+    const base = texture.baseTexture;
+    if (!base._glTextures[renderer.CONTEXT_UID]) continue;
+    // Bind through Pixi so its record of the bound texture stays right.
+    renderer.texture.bind(base, 0);
+    gl.texParameterf(gl.TEXTURE_2D, gl.TEXTURE_MAX_LOD, MAX_MIP_LEVEL);
+  }
 }
 
 /** Mouth parameter ids: the model's LipSync group, or the standard names. */
