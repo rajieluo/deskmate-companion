@@ -94,7 +94,7 @@ In `%APPDATA%\com.rajieluo.desktopassistant\settings.json`:
 | Setting       | Default              | Meaning                                         |
 | ------------- | -------------------- | ----------------------------------------------- |
 | `crew_home`   | `~/firstmate`        | The firstmate folder inside WSL                 |
-| `crew_distro` | WSL's default distro | Which WSL distribution to use, e.g. `"Ubuntu"` |
+| `crew_distro` | an Ubuntu distro if there is one | Which WSL distribution to use, e.g. `"Ubuntu"`. Docker Desktop's distros are always skipped. |
 
 ## How it works
 

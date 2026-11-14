@@ -122,10 +122,59 @@ impl CrewConfig {
     pub fn from_settings(store: &ModelStore) -> Self {
         let s = store.settings();
         Self {
-            distro: s.crew_distro.filter(|d| !d.trim().is_empty()),
+            distro: s.crew_distro.filter(|d| !d.trim().is_empty()).or_else(auto_distro),
             home: s.crew_home.filter(|h| !h.trim().is_empty()).unwrap_or_else(|| DEFAULT_HOME.into()),
         }
     }
+}
+
+/// Distributions that can't host firstmate (Docker Desktop's internal ones).
+fn usable_distro(name: &str) -> bool {
+    !name.is_empty() && !name.starts_with("docker-desktop")
+}
+
+/// Picks the distro when `crew_distro` isn't set. WSL's default is often Docker
+/// Desktop's internal distro, so prefer an Ubuntu, then any other usable one.
+pub fn pick_distro(names: &[String]) -> Option<String> {
+    let usable: Vec<&String> = names.iter().filter(|n| usable_distro(n)).collect();
+    usable
+        .iter()
+        .find(|n| n.to_ascii_lowercase().starts_with("ubuntu"))
+        .or(usable.first())
+        .map(|n| n.to_string())
+}
+
+/// `wsl.exe -l -q` prints UTF-16LE names, one per line.
+pub fn parse_distro_list(bytes: &[u8]) -> Vec<String> {
+    let text = if bytes.len() >= 2 && bytes[1] == 0 {
+        let units: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        String::from_utf16_lossy(&units)
+    } else {
+        String::from_utf8_lossy(bytes).into_owned()
+    };
+    text.trim_start_matches('\u{feff}').lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect()
+}
+
+fn auto_distro() -> Option<String> {
+    if !cfg!(windows) {
+        return None;
+    }
+    static PICKED: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    PICKED
+        .get_or_init(|| {
+            let mut cmd = std::process::Command::new("wsl.exe");
+            cmd.args(["-l", "-q"]);
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x0800_0000);
+            }
+            let names = cmd.output().map(|o| parse_distro_list(&o.stdout)).unwrap_or_default();
+            let picked = pick_distro(&names);
+            log::info!("crew: WSL distros {names:?}, using {picked:?}");
+            picked
+        })
+        .clone()
 }
 
 /// C:\Users\Alex\AppData\x -> /mnt/c/Users/Alex/AppData/x (WSL's default automount).
@@ -665,6 +714,16 @@ mod tests {
         assert_eq!(list, vec![Reply { id: "n1".into(), body: "[happy] On it.".into() }]);
         assert_eq!(cursor.as_deref(), Some("000000000001"));
         assert!(split_poll("no marker").is_none());
+    }
+
+    #[test]
+    fn skips_docker_desktop_distros() {
+        let list = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(pick_distro(&list(&["docker-desktop", "Ubuntu-24.04"])).as_deref(), Some("Ubuntu-24.04"));
+        assert_eq!(pick_distro(&list(&["docker-desktop", "docker-desktop-data"])), None);
+        assert_eq!(pick_distro(&list(&["docker-desktop", "Debian", "Ubuntu"])).as_deref(), Some("Ubuntu"));
+        let utf16: Vec<u8> = "docker-desktop\r\nUbuntu\r\n".encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+        assert_eq!(parse_distro_list(&utf16), list(&["docker-desktop", "Ubuntu"]));
     }
 
     #[test]
