@@ -80,7 +80,25 @@ case $cmd in
     echo ok
     ;;
   note)
-    exec bin/fm-inbox.sh note --json --request-id "$1" -
+    bin/fm-inbox.sh note --json --request-id "$1" -
+    code=$?
+    # An idle firstmate only reads its inbox when it gets a turn (its watcher runs only
+    # while there's crew work to supervise), so ring the first mate's Herdr pane: the
+    # Claude pane whose folder is this home. Claude Code queues it if it's mid-turn.
+    if [ "$code" -eq 0 ] || [ "$code" -eq 3 ]; then
+      if command -v herdr >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+        want=$(basename "$PWD")
+        pane=$(herdr pane list 2>/dev/null | jq -r --arg want "$want" '
+          [.result.panes[]?
+           | select(((.agent // "") | ascii_downcase) == "claude")
+           | select(((.cwd // "") | gsub("\\\\"; "/") | rtrimstr("/") | split("/") | last) == $want)]
+          | .[0].pane_id // empty' 2>/dev/null)
+        if [ -n "$pane" ]; then
+          herdr pane run "$pane" "You have a new avatar note: check your inbox." >/dev/null 2>&1 || true
+        fi
+      fi
+    fi
+    exit "$code"
     ;;
   poll)
     after=$1
@@ -137,13 +155,34 @@ esac
 "#;
 
 /// Added to every message so the first mate knows where it came from and how to answer.
-pub fn note_body(name: &str, text: &str) -> String {
-    format!(
+/// How the first mate's answers to an avatar note should sound.
+pub enum Character<'a> {
+    /// No persona: plain short speech.
+    None,
+    /// The persona text, sent the first time and whenever it changes.
+    Full(&'a str),
+    /// The same persona as an earlier note.
+    Same,
+}
+
+pub fn note_body(name: &str, text: &str, character: Character) -> String {
+    let mut body = format!(
         "{text}\n\n(Sent by the captain through {name}, the desktop avatar. Please answer this note with \
 `bin/fm-inbox.sh reply <note id>` so the avatar can read it out: one to three short spoken sentences, \
-no Markdown, starting with one emotion tag from {tags}.)",
+no Markdown, starting with one emotion tag from {tags}.",
         tags = crate::chat::EMOTION_TAGS
-    )
+    );
+    match character {
+        Character::None => {}
+        Character::Full(persona) => body.push_str(&format!(
+            " Write those replies in character as {name}, described below. Let the character color only \
+how the replies sound; your work, decisions and facts stay exactly as careful as usual, and your \
+terminal output is unchanged.\n\n{name}'s character:\n{persona}\n"
+        )),
+        Character::Same => body.push_str(&format!(" Keep replying in character as {name}, as in the earlier avatar notes.")),
+    }
+    body.push(')');
+    body
 }
 
 /// How the app reaches firstmate.
@@ -577,6 +616,8 @@ struct PollState {
     tasks: BTreeMap<String, Task>,
     /// Notes this app sent, so their replies are always read out.
     sent: HashSet<String>,
+    /// The name and persona the last note carried in full.
+    persona_sent: Option<String>,
 }
 
 #[derive(Default)]
@@ -594,14 +635,34 @@ impl Crew {
     }
 
     /// Queues a message for the first mate. Returns what she says right away.
-    pub async fn send<R: Runtime>(&self, app: &AppHandle<R>, name: &str, text: &str) -> Result<String, String> {
+    /// Queues `text` for the first mate. `persona` is the current model's character, sent
+    /// in full the first time (per app run) and whenever it changes, and referred to otherwise.
+    pub async fn send<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        name: &str,
+        text: &str,
+        persona: Option<&str>,
+    ) -> Result<String, String> {
         let config = CrewConfig::from_settings(&app.state::<std::sync::Arc<ModelStore>>());
         self.ensure_checked(app, &config).await?;
         let request_id = request_id();
-        let out = run_helper(app, &config, &["note", &request_id], Some(&note_body(name, text))).await?;
+        let key = persona.map(|p| format!("{name}\n{p}"));
+        let character = match persona {
+            None => Character::None,
+            Some(_) if self.state.lock().unwrap().persona_sent == key => Character::Same,
+            Some(p) => Character::Full(p),
+        };
+        let out = run_helper(app, &config, &["note", &request_id], Some(&note_body(name, text, character))).await?;
         let json: Value = out.stdout.lines().rev().find_map(|l| serde_json::from_str(l).ok()).unwrap_or(Value::Null);
-        if let Some(id) = json["id"].as_str() {
-            self.state.lock().unwrap().sent.insert(id.to_string());
+        {
+            let mut state = self.state.lock().unwrap();
+            if let Some(id) = json["id"].as_str() {
+                state.sent.insert(id.to_string());
+            }
+            if matches!(out.code, 0 | 3) {
+                state.persona_sent = key;
+            }
         }
         match out.code {
             0 => Ok("[happy] I passed that to the first mate. I'll tell you when it answers.".into()),
@@ -854,9 +915,13 @@ mod tests {
 
     #[test]
     fn note_asks_for_a_spoken_reply() {
-        let body = note_body("Aqua", "fix the flaky test");
+        let body = note_body("Aqua", "fix the flaky test", Character::None);
         assert!(body.starts_with("fix the flaky test\n\n"));
         assert!(body.contains("fm-inbox.sh reply"));
         assert!(body.contains("[happy]"));
+        assert!(!body.contains("in character") && body.ends_with(".)"));
+        let body = note_body("Nicole", "hi", Character::Full("Greedy but kind."));
+        assert!(body.contains("in character as Nicole") && body.contains("Greedy but kind.\n)"));
+        assert!(note_body("Nicole", "hi", Character::Same).contains("Keep replying in character as Nicole"));
     }
 }
