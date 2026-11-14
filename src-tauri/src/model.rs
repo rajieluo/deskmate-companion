@@ -44,6 +44,10 @@ pub struct Settings {
     pub claude_code_permission_mode: Option<String>,
     /// Spoken language code for voice input, e.g. "en" (default) or "auto" with a multilingual model.
     pub stt_language: Option<String>,
+    /// Per-model overrides for which parameters follow the mouse, keyed by the
+    /// model's folder name, e.g. {"xch003_01": {"angle_x": "Param12"}}. Keys:
+    /// angle_x, angle_y, angle_z, eye_x, eye_y, body_x. Use "" to turn one off.
+    pub look_params: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 #[derive(Clone, Serialize)]
@@ -55,6 +59,8 @@ pub struct ModelInfo {
     /// Bumped on every model change; used as the first URL segment so the
     /// webview never serves a cached file from a previous model.
     pub generation: u64,
+    /// This model's entry from `look_params`, if any.
+    pub look: Option<serde_json::Value>,
 }
 
 struct Inner {
@@ -94,10 +100,13 @@ impl ModelStore {
     pub fn current(&self) -> Option<ModelInfo> {
         let inner = self.inner.lock().unwrap();
         let path = inner.settings.model_path.as_ref()?;
+        let folder = path.parent().and_then(|p| p.file_name()).map(|f| f.to_string_lossy().into_owned());
+        let look = inner.settings.look_params.as_ref().zip(folder).and_then(|(m, f)| m.get(&f).cloned());
         Some(ModelInfo {
             file_name: path.file_name()?.to_string_lossy().into_owned(),
             path: path.display().to_string(),
             generation: inner.generation,
+            look,
         })
     }
 

@@ -53,7 +53,7 @@ async function load(source: host.ModelSource | null) {
   }
   showStatus("Loading model…");
   try {
-    const summary = await avatar.load(source.url);
+    const summary = await avatar.load(source.url, source.look);
     showStatus(null);
     console.info("[avatar] loaded", source.label, summary);
     document.body.dataset.ready = "true";

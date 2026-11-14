@@ -1,4 +1,5 @@
 // The Live2D character: loading, framing, motions, gaze and pixel hit-testing.
+import { detectLookParams, type LookParams } from "./look";
 import * as PIXI from "pixi.js";
 import { Live2DModel, MotionPriority } from "pixi-live2d-display/cubism4";
 import { alphaBounds, boxToCrop, FULL_CROP, layout, type Crop } from "./fit";
@@ -49,7 +50,10 @@ export class Avatar {
     return this.model !== null;
   }
 
-  async load(url: string): Promise<MotionSummary> {
+  /** Parameters that follow the mouse for the current model (see look.ts). */
+  lookParams: LookParams | null = null;
+
+  async load(url: string, look: Partial<Record<string, string>> = {}): Promise<MotionSummary> {
     const id = ++this.loadId;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Could not read ${url} (HTTP ${res.status})`);
@@ -70,6 +74,7 @@ export class Avatar {
     this.groups = settings.FileReferences.Motions ?? {};
     this.lipSyncIds = lipSyncIds(json);
     model.internalModel.on("beforeModelUpdate", () => this.applyMouth());
+    this.lookParams = applyLookParams(model, look);
     this.summary = summary;
     model.alpha = 0;
     this.app.stage.addChild(model);
@@ -215,6 +220,42 @@ export class Avatar {
   lookAt(x: number, y: number) {
     this.model?.focus(x, y);
   }
+}
+
+/**
+ * Points the library's mouse-follow and breathing at this model's own parameter
+ * IDs. It only knows the Cubism 3 names (ParamAngleX...), so models that use
+ * PARAM_ANGLE_X-style or other names would otherwise ignore the cursor.
+ */
+function applyLookParams(model: Live2DModel, look: Partial<Record<string, string>>): LookParams | null {
+  type Internal = Record<string, unknown> & {
+    coreModel: { _model?: { parameters?: { ids?: string[] } } };
+    breath?: { getParameters(): { parameterId: string }[] };
+  };
+  const internal = model.internalModel as unknown as Internal;
+  const ids = internal.coreModel._model?.parameters?.ids;
+  if (!ids) return null;
+  const found = detectLookParams(Array.from(ids), look);
+  const fields: [keyof LookParams, string][] = [
+    ["angle_x", "idParamAngleX"],
+    ["angle_y", "idParamAngleY"],
+    ["angle_z", "idParamAngleZ"],
+    ["eye_x", "idParamEyeBallX"],
+    ["eye_y", "idParamEyeBallY"],
+    ["body_x", "idParamBodyAngleX"],
+    ["breath", "idParamBreath"],
+  ];
+  // A role with no parameter gets an id the model doesn't have, which Cubism ignores.
+  for (const [role, field] of fields) internal[field] = found[role] ?? `__none_${role}`;
+  // CubismBreath copied the ids at init, in this order.
+  const breath = internal.breath?.getParameters() ?? [];
+  const order: (keyof LookParams)[] = ["angle_x", "angle_y", "angle_z", "body_x", "breath"];
+  breath.forEach((b, i) => {
+    const role = order[i];
+    if (role) b.parameterId = found[role] ?? `__none_${role}`;
+  });
+  console.info("[avatar] mouse-follow parameters", found);
+  return found;
 }
 
 /** Mouth parameter ids: the model's LipSync group, or the standard names. */

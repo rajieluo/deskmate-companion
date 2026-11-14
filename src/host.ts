@@ -11,17 +11,24 @@ export interface ModelInfo {
   file_name: string;
   path: string;
   generation: number;
+  look?: unknown;
 }
 
 export interface ModelSource {
   url: string;
   label: string;
+  /** Overrides from settings.json `look_params` for this model. */
+  look?: Partial<Record<string, string>>;
 }
 
 function toSource(info: ModelInfo): ModelSource {
   // e.g. http://model.localhost/3/1014100.model3.json on Windows.
   const base = convertFileSrc("", "model").replace(/\/?$/, "/");
-  return { url: `${base}${info.generation}/${encodeURIComponent(info.file_name)}`, label: info.path };
+  return {
+    url: `${base}${info.generation}/${encodeURIComponent(info.file_name)}`,
+    label: info.path,
+    look: (info.look as ModelSource["look"]) ?? undefined,
+  };
 }
 
 export async function currentModel(): Promise<ModelSource | null> {

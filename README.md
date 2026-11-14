@@ -76,6 +76,12 @@ Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistan
 - `chat_effort`: `low` (default, quick chatty replies), `medium`, `high`, `xhigh` or `max`.
 - `voice_enabled`, `voice`, `voice_speed`: speech on or off, the Kokoro voice (`af_heart` by default; also `af_bella`, `af_nicole`, `af_sky`, `bf_emma` and [others](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md)) and speed (0.5 to 2).
 - `stt_model`, `stt_language`: the Whisper model for voice input (`tiny.en`, `base.en` by default, `small.en` for better accuracy, or multilingual `small` with `"stt_language": "auto"`) and the spoken language.
+- `look_params`: which parameters follow the mouse, per model folder. The app finds the head, eye and
+  body parameters by name on its own, in both the `ParamAngleX` and the older `PARAM_ANGLE_X` styles. For a
+  model with generic names like `Param12`, name them yourself, e.g.
+  `"look_params": { "xch003_01": { "angle_x": "Param12", "angle_y": "Param13", "eye_x": "Param20" } }`.
+  The keys are `angle_x`, `angle_y`, `angle_z`, `eye_x`, `eye_y`, `body_x` and `breath`, and `""` turns one off.
+  The parameters chosen for the current model are printed in the dev tools console as "mouse-follow parameters".
 - `persona`: replaces the built-in personality prompt. Keep the line asking for one emotion tag per reply (`[happy] [sad] [angry] [surprised] [shy] [thinking] [proud] [neutral]`), since the tags are what make her move.
 
 Claude starts each reply with an emotion tag such as `[happy]`. The app strips the tags from the text and plays the matching motion. The API call is made from the Rust side, so the key never reaches the web page. Server-side refusal fallbacks are turned on, so if Claude Opus 5.5 declines a message the API retries it on a fallback model in the same call.
