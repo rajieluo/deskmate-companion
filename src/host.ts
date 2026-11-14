@@ -113,7 +113,7 @@ export interface ChatStatus {
   voice: string;
   voice_speed: number;
   voice_device: string;
-  brain: "api" | "claude_code";
+  brain: "api" | "claude_code" | "crew";
   claude_code_folder: string | null;
 }
 export interface ChatHandlers {
@@ -277,4 +277,55 @@ export function onBrainChanged(cb: (brain: string) => void) {
 
 export function onModelPicked(cb: (model: string) => void) {
   if (inTauri) void listen<string>("model-picked", (e) => cb(e.payload));
+}
+
+// --- Crew mode (firstmate in WSL; see src-tauri/src/crew.rs).
+
+export interface CrewTask {
+  id: string;
+  kind: string | null;
+  project: string | null;
+  /** working, needs-decision, blocked, paused, done, failed, resolved, pr-ready, merged */
+  state: string;
+  text: string;
+  pr: string | null;
+  updated: number;
+}
+
+export interface CrewAttention {
+  task: string;
+  kind: string;
+  /** What she says, starting with an emotion tag. */
+  speech: string;
+}
+
+export async function crewTasks(): Promise<CrewTask[]> {
+  return inTauri ? invoke<CrewTask[]>("crew_tasks") : [];
+}
+
+export async function crewOpenTerminal() {
+  if (inTauri) await invoke("crew_open_terminal");
+}
+
+export async function openUrl(url: string) {
+  if (inTauri) await invoke("open_url", { url });
+  else window.open(url, "_blank");
+}
+
+export function onCrewTasks(cb: (tasks: CrewTask[]) => void) {
+  if (inTauri) void listen<CrewTask[]>("crew-tasks", (e) => cb(e.payload));
+}
+
+/** The first mate's answer to a message (published with fm-inbox.sh reply). */
+export function onCrewReply(cb: (body: string) => void) {
+  if (inTauri) void listen<{ id: string; body: string }>("crew-reply", (e) => cb(e.payload.body));
+}
+
+/** A task needs you, failed, or has a PR ready. */
+export function onCrewAttention(cb: (a: CrewAttention) => void) {
+  if (inTauri) void listen<CrewAttention>("crew-attention", (e) => cb(e.payload));
+}
+
+export function onCrewError(cb: (message: string) => void) {
+  if (inTauri) void listen<string>("crew-error", (e) => cb(e.payload));
 }
