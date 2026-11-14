@@ -3,6 +3,7 @@ import type { Avatar } from "./avatar";
 import * as host from "./host";
 import { SentenceBuffer, speakable } from "./sentences";
 import { TagStream } from "./tags";
+import { setLinkedText } from "./links";
 import { Mic } from "./mic";
 import type { Voice } from "./voice";
 
@@ -29,6 +30,8 @@ export class ChatUI {
   private tags = new TagStream();
   private sentences = new SentenceBuffer();
   private hideTimer: number | undefined;
+  /** The bubble's text as written (links stay "[label](url)" here, for the history). */
+  private bubbleRaw = "";
   private name = "Assistant";
 
   constructor(
@@ -207,7 +210,7 @@ export class ChatUI {
     this.sentences = new SentenceBuffer();
     this.voice.stop();
     this.say("…");
-    this.bubbleText.textContent = "";
+    this.setBubbleText("");
     this.activity.hidden = true;
     this.bubble.classList.add("thinking");
     if (this.turn) this.floor = this.turn + 1;
@@ -247,8 +250,8 @@ export class ChatUI {
     this.append(rest);
     for (const s of [...this.sentences.push(rest), ...this.sentences.flush()]) this.voice.say(speakable(s));
     this.bubble.classList.remove("thinking");
-    host.historyAppend("assistant", this.bubbleText.textContent ?? "");
-    const words = (this.bubbleText.textContent ?? "").split(/\s+/).length;
+    host.historyAppend("assistant", this.bubbleRaw);
+    const words = this.bubbleRaw.split(/\s+/).length;
     this.scheduleHide(Math.min(30000, 5000 + words * 350));
   }
 
@@ -287,9 +290,14 @@ export class ChatUI {
   }
 
   private append(text: string) {
-    this.bubbleText.textContent += text;
+    this.setBubbleText(this.bubbleRaw + text);
     this.bubble.scrollTop = this.bubble.scrollHeight;
     this.placeBubble();
+  }
+
+  private setBubbleText(text: string) {
+    this.bubbleRaw = text;
+    setLinkedText(this.bubbleText, text);
   }
 
   /** Sits the bubble just above the character's head (overlapping the hair a little). */
@@ -302,7 +310,7 @@ export class ChatUI {
 
   private say(text: string, hideAfter?: number) {
     window.clearTimeout(this.hideTimer);
-    this.bubbleText.textContent = text;
+    this.setBubbleText(text);
     this.bubble.hidden = false;
     this.bubble.setAttribute("data-hit", "");
     this.placeBubble();

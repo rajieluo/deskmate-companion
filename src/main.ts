@@ -17,7 +17,23 @@ const useBeep = !host.inTauri && new URLSearchParams(location.search).get("tts")
 const voice = new Voice(useBeep ? new BeepEngine() : kokoro);
 avatar.setMouthSource(() => voice.level());
 (window as unknown as { voice: Voice }).voice = voice;
-const poses = new PosePicker(avatar);
+const poses = new PosePicker(avatar, {
+  get speed() {
+    return kokoro.speed;
+  },
+  get pitch() {
+    return kokoro.pitch;
+  },
+  set({ speed = kokoro.speed, pitch = kokoro.pitch }) {
+    kokoro.speed = speed;
+    kokoro.pitch = pitch;
+    host.setVoiceTuning(speed, pitch);
+    if (voice.enabled) {
+      voice.stop();
+      voice.say("Hi! This is how I sound now.");
+    }
+  },
+});
 const chat = new ChatUI(avatar, voice);
 const crew = new CrewUI();
 chat.onModeChange = (brain) => crew.setEnabled(brain === "crew");
@@ -29,6 +45,7 @@ void host.chatStatus().then((s) => {
   avatar.setFade(s.fade_bottom);
   kokoro.voice = s.voice;
   kokoro.speed = s.voice_speed;
+  kokoro.pitch = s.voice_pitch;
   kokoro.device = s.voice_device === "gpu" ? "gpu" : "cpu";
   // Start the (large, first-time) model download early instead of on the first reply.
   if (s.voice_enabled && !useBeep) kokoro.warmUp();

@@ -1,5 +1,6 @@
 // The Chat history window: every message saved in history.jsonl, grouped by day.
 import * as host from "./host";
+import { findLinks, linkElement } from "./links";
 
 const log = document.getElementById("log")!;
 const search = document.getElementById("search") as HTMLInputElement;
@@ -48,7 +49,15 @@ function render() {
     const msg = el("div", `msg ${e.role}`);
     msg.append(el("div", "meta", `${who} · ${timeFmt.format(date)}${mode}`));
     const body = el("div", "text");
-    highlighted(body, e.text, q);
+    for (const part of findLinks(e.text)) {
+      if (!part.url) {
+        highlighted(body, part.text, q);
+        continue;
+      }
+      const a = linkElement({ text: "", url: part.url });
+      highlighted(a, part.text, q);
+      body.append(a);
+    }
     msg.append(body);
     log.append(msg);
   }

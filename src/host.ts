@@ -112,6 +112,7 @@ export interface ChatStatus {
   fade_bottom: boolean;
   voice: string;
   voice_speed: number;
+  voice_pitch: number;
   voice_device: string;
   brain: "api" | "claude_code" | "crew";
   claude_code_folder: string | null;
@@ -171,6 +172,11 @@ export function setVoiceEnabled(on: boolean) {
 
 const browserVoiceListeners: ((on: boolean) => void)[] = [];
 
+/** Saves the voice speed (0.5 to 2) and pitch (0.75 to 1.35) to settings. */
+export function setVoiceTuning(speed: number, pitch: number) {
+  if (inTauri) void invoke("set_voice_tuning", { speed, pitch }).catch((e) => console.warn("[voice]", e));
+}
+
 /** Motion and expression files in the current model's folder (relative paths). */
 export async function modelFiles(): Promise<string[]> {
   if (inTauri) return invoke<string[]>("model_files").catch(() => []);
@@ -186,7 +192,7 @@ export function log(level: "info" | "warn" | "error", message: string) {
 
 export async function chatStatus(): Promise<ChatStatus> {
   if (!inTauri) {
-    return { hotkeys: { talk: "Ctrl+Shift+Space", listen: "Ctrl+Alt+M", mute: "Ctrl+Alt+U" }, has_key: true, name: "Aqua", model: "demo", voice_enabled: true, follow_mouse: true, fade_bottom: true, voice: "af_heart", voice_speed: 1, voice_device: "cpu", brain: "api", claude_code_folder: null };
+    return { hotkeys: { talk: "Ctrl+Shift+Space", listen: "Ctrl+Alt+M", mute: "Ctrl+Alt+U" }, has_key: true, name: "Aqua", model: "demo", voice_enabled: true, follow_mouse: true, fade_bottom: true, voice: "af_heart", voice_speed: 1, voice_pitch: 1, voice_device: "cpu", brain: "api", claude_code_folder: null };
   }
   return invoke<ChatStatus>("chat_status");
 }

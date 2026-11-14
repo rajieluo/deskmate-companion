@@ -12,6 +12,16 @@ describe("Endpointer", () => {
     expect(e.heardSpeech).toBe(true);
   });
 
+  it("remembers where the speech was", () => {
+    const e = new Endpointer(opts);
+    e.push(0.001, 500);
+    e.push(0.1, 500);
+    e.push(0.1, 500);
+    e.push(0.001, 500);
+    expect(e.speechStart).toBe(500);
+    expect(e.speechEnd).toBe(1500);
+  });
+
   it("gives up when nobody speaks", () => {
     const e = new Endpointer(opts);
     for (let i = 0; i < 9; i++) expect(e.push(0, 500)).toBe(false);

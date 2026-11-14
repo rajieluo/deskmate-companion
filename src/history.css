@@ -92,3 +92,4 @@ main {
   color: var(--muted);
 }
 mark { background: #ffe58a; color: inherit; border-radius: 2px; }
+.text a { color: #3f5fe0; text-decoration: underline; overflow-wrap: anywhere; cursor: pointer; }

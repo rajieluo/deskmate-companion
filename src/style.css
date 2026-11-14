@@ -69,6 +69,13 @@ body {
   white-space: pre-wrap;
 }
 
+#bubble a {
+  color: #3f5fe0;
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
 #bubble-activity {
   margin-top: 6px !important;
   color: #6b7090;
@@ -357,4 +364,25 @@ body[data-brain="crew"] #chat input {
 #poses .empty {
   margin: 0 2px;
   color: #8a90ad;
+}
+
+#poses .slider {
+  display: grid;
+  grid-template-columns: 44px 1fr 42px;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 2px 4px;
+  font-size: 12px;
+}
+
+#poses .slider input {
+  width: 100%;
+  accent-color: #6f8cff;
+  cursor: pointer;
+}
+
+#poses .slider output {
+  text-align: right;
+  color: #5a6185;
+  font-variant-numeric: tabular-nums;
 }

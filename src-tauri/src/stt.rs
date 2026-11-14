@@ -131,12 +131,23 @@ impl Stt {
         Ok(ctx)
     }
 
+    /// Loads the model ahead of the first transcription. Blocking.
+    pub fn preload(&self, name: &str, path: &Path) {
+        if let Err(e) = self.context(name, path) {
+            log::warn!("preloading Whisper model: {e}");
+        }
+    }
+
     /// Transcribes 16 kHz mono f32 audio. Blocking: call from a worker thread.
     pub fn transcribe(&self, name: &str, path: &Path, samples: &[f32], language: &str) -> Result<String, String> {
         let ctx = self.context(name, path)?;
         let mut state = ctx.create_state().map_err(|e| e.to_string())?;
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         params.set_language(Some(language));
+        // Whisper encodes a full 30 s window by default; a short message only needs
+        // the part it fills, which makes the encoder several times faster.
+        params.set_audio_ctx(audio_ctx(samples.len()));
+        params.set_single_segment(true);
         params.set_n_threads(std::thread::available_parallelism().map(|n| n.get().min(8) as i32).unwrap_or(4));
         params.set_print_special(false);
         params.set_print_progress(false);
@@ -148,6 +159,14 @@ impl Stt {
         let text: String = state.as_iter().map(|s| s.to_string()).collect();
         Ok(clean(&text))
     }
+}
+
+/// Encoder frames (50 per second, 1500 for the full 30 s window) to cover the
+/// audio plus a margin. Too tight a window makes Whisper hallucinate, so short
+/// clips still get at least 5 s.
+pub fn audio_ctx(samples: usize) -> i32 {
+    let frames = samples / 320 + 128;
+    frames.clamp(256, 1500) as i32
 }
 
 /// Drops Whisper's non-speech markers like "[BLANK_AUDIO]" or "(music)".
@@ -187,6 +206,13 @@ mod tests {
     fn removes_non_speech_markers() {
         assert_eq!(clean(" [BLANK_AUDIO] "), "");
         assert_eq!(clean(" Hello there. (laughs) How are you?"), "Hello there. How are you?");
+    }
+
+    #[test]
+    fn audio_window_fits_the_clip() {
+        assert_eq!(audio_ctx(16000), 256);
+        assert_eq!(audio_ctx(16000 * 10), 628);
+        assert_eq!(audio_ctx(16000 * 40), 1500);
     }
 
     #[test]

@@ -33,6 +33,8 @@ pub struct Settings {
     pub voice: Option<String>,
     /// Speaking speed, 0.5 to 2. Default: 1.
     pub voice_speed: Option<f32>,
+    /// Voice pitch as a factor, 0.75 (lower) to 1.35 (higher). Default: 1.
+    pub voice_pitch: Option<f32>,
     /// Where Kokoro runs: "cpu" (default, reliable) or "gpu" (DirectML in the app;
     /// WebGPU in the slower built-in voice, which garbles on some graphics drivers).
     pub voice_device: Option<String>,
