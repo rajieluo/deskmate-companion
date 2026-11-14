@@ -29,10 +29,25 @@ pub const DEFAULT_EFFORT: &str = "low";
 pub const EMOTION_TAGS: &str = "[happy] [sad] [angry] [surprised] [shy] [thinking] [proud] [neutral]";
 
 pub fn default_persona(name: &str) -> String {
+    persona_prompt(name, None)
+}
+
+/// The system prompt for API mode. `character` is the model's own persona file
+/// (see `model::find_persona`); without one she gets the built-in personality.
+/// The reply rules are always added, so a persona file never has to repeat them.
+pub fn persona_prompt(name: &str, character: Option<&str>) -> String {
+    let character = match character {
+        Some(text) => format!(
+            "Your character:\n{text}\n\n\
+Stay in character in how you talk, but you are still a genuinely helpful assistant: when the \
+user asks for help, give a correct, useful answer in your own voice, and never let the act \
+get in the way of the facts."
+        ),
+        None => "You are warm, playful and a little dramatic, but genuinely helpful when asked for help.".into(),
+    };
     format!(
         "You are {name}, a small animated character who lives on the user's Windows desktop \
-and chats with them while they work. You are warm, playful and a little dramatic, \
-but genuinely helpful when asked for help.\n\n\
+and chats with them while they work. {character}\n\n\
 How to reply:\n\
 - Keep replies short: one to three sentences, like talking out loud. Only go longer \
 when the user clearly asks for detail.\n\
@@ -351,6 +366,16 @@ mod tests {
         let mut acc = StreamAccumulator::default();
         acc.feed_event("event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n");
         assert_eq!(acc.error.as_deref(), Some("Overloaded"));
+    }
+
+    #[test]
+    fn persona_file_keeps_the_reply_rules() {
+        let p = persona_prompt("Nicole", Some("You run a tiny, broke agency."));
+        assert!(p.starts_with("You are Nicole,"));
+        assert!(p.contains("You run a tiny, broke agency."));
+        assert!(p.contains("genuinely helpful"));
+        assert!(p.contains("[happy]") && p.contains("one to three sentences"));
+        assert!(!p.contains("warm, playful"));
     }
 
     #[test]
