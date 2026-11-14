@@ -54,6 +54,8 @@ pub struct Settings {
     /// Per-model parameter values held every frame, keyed by folder name, e.g.
     /// {"Nicole": {"MouthJawOpen": 0}}. Lip sync still moves the mouth while speaking.
     pub model_params: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Fade out the bottom edge of the figure. Default: true.
+    pub fade_bottom: Option<bool>,
     /// Head and eyes follow the mouse cursor. Default: true.
     pub follow_mouse: Option<bool>,
 }

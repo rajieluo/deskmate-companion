@@ -159,6 +159,12 @@ export class Avatar {
    * Softly fades out the bottom edge of the figure, for models drawn without
    * feet (like Aqua), so the cut-off reads as intentional.
    */
+  /** Turns the bottom fade on (default band) or off. */
+  setFade(on: boolean) {
+    this.fadeBottom = on ? 0.16 : 0;
+    this.place();
+  }
+
   private applyFade(y: number, scale: number) {
     const model = this.model!;
     const canvas = this.app.view as HTMLCanvasElement;

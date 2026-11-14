@@ -20,6 +20,7 @@ kokoro.onStatus = (s) => chat.status(s);
 void host.chatStatus().then((s) => {
   voice.enabled = s.voice_enabled;
   avatar.setFollowMouse(s.follow_mouse);
+  avatar.setFade(s.fade_bottom);
   kokoro.voice = s.voice;
   kokoro.speed = s.voice_speed;
   kokoro.device = s.voice_device === "gpu" ? "gpu" : "cpu";
@@ -27,6 +28,7 @@ void host.chatStatus().then((s) => {
   if (s.voice_enabled && !useBeep) kokoro.warmUp();
 });
 host.onFollowMouseChanged((on) => avatar.setFollowMouse(on));
+host.onFadeBottomChanged((on) => avatar.setFade(on));
 host.onVoiceChanged((on) => {
   voice.enabled = on;
   if (!on) voice.stop();
