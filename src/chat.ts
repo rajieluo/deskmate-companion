@@ -187,6 +187,7 @@ export class ChatUI {
     for (const mood of [...first.moods, ...last.moods]) if (mood !== "neutral") this.avatar.emote(mood);
     const plain = (first.text + last.text).trim();
     if (!plain) return;
+    host.historyAppend("assistant", plain);
     this.bubble.classList.remove("thinking");
     this.activity.hidden = true;
     this.say(plain);
