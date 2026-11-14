@@ -105,7 +105,23 @@ case $cmd in
     ;;
   open)
     if command -v herdr >/dev/null 2>&1; then
-      # Windows: Herdr is the crew's terminal. Start the first mate in its pane with `claude`.
+      # Windows: Herdr is the crew's terminal. When no Herdr was running yet, type
+      # `claude` into its first pane once it's up, which starts the first mate.
+      # (With Herdr already running, its panes may be crewmates, so leave them alone.)
+      if ! herdr pane list >/dev/null 2>&1 && ! bin/fm-inbox.sh ready 2>/dev/null | grep -q '"can_receive":true'; then
+        winhome=$(cygpath -w "$PWD" 2>/dev/null || pwd)
+        (
+          for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+            sleep 1
+            pane=$(herdr pane list 2>/dev/null | jq -r '.result.panes[0].pane_id // empty' 2>/dev/null)
+            if [ -n "$pane" ]; then
+              sleep 2
+              herdr pane run "$pane" "cd '$winhome'; claude"
+              break
+            fi
+          done
+        ) >/dev/null 2>&1 &
+      fi
       exec herdr
     fi
     if command -v tmux >/dev/null 2>&1; then
