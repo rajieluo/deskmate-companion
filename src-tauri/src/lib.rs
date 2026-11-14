@@ -108,15 +108,22 @@ async fn chat_send<R: Runtime>(
             name,
         };
         let code = code.inner().clone();
-        return Ok(code.send(&app, text, config).await);
+        let turn = code.begin();
+        tauri::async_runtime::spawn(async move { code.run(&app, turn, text, config).await });
+        return Ok(turn);
     }
     let config = ChatConfig {
         model: s.chat_model.unwrap_or_else(|| chat::DEFAULT_MODEL.into()),
         effort: s.chat_effort.unwrap_or_else(|| chat::DEFAULT_EFFORT.into()),
         persona: s.persona.unwrap_or_else(|| chat::default_persona(&name)),
     };
+    // Return the turn number right away and stream in the background. (Awaiting the
+    // whole reply here meant the page learned the turn only after every event had
+    // already gone by, so it ignored them all and the bubble stayed on "…".)
     let chat = chat.inner().clone();
-    Ok(chat.send(&app, text, config).await)
+    let turn = chat.begin();
+    tauri::async_runtime::spawn(async move { chat.run(&app, turn, text, config).await });
+    Ok(turn)
 }
 
 #[tauri::command]

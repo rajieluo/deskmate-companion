@@ -19,7 +19,10 @@ export class ChatUI {
   private micButton = $<HTMLButtonElement>("mic");
   private mic = new Mic();
   private transcribing = false;
+  /** The reply being shown; 0 while a send is in flight and its number isn't known yet. */
   private turn = 0;
+  /** Lowest turn number the in-flight send can have (older turns are stale). */
+  private floor = 1;
   private tags = new TagStream();
   private sentences = new SentenceBuffer();
   private hideTimer: number | undefined;
@@ -30,10 +33,10 @@ export class ChatUI {
     private voice: Voice,
   ) {
     host.onChat({
-      delta: (turn, text) => turn === this.turn && this.onDelta(text),
-      done: (turn) => turn === this.turn && this.onDone(),
-      activity: (turn, text) => turn === this.turn && this.onActivity(text),
-      error: (turn, kind, message) => turn === this.turn && this.onError(kind, message),
+      delta: (turn, text) => this.accept(turn) && this.onDelta(text),
+      done: (turn) => this.accept(turn) && this.onDone(),
+      activity: (turn, text) => this.accept(turn) && this.onActivity(text),
+      error: (turn, kind, message) => this.accept(turn) && this.onError(kind, message),
     });
     host.onEvent("open-chat", () => this.open());
     host.onEvent("open-api-key", () => this.askForKey());
@@ -160,7 +163,16 @@ export class ChatUI {
     this.bubbleText.textContent = "";
     this.activity.hidden = true;
     this.bubble.classList.add("thinking");
-    this.turn = await host.chatSend(text);
+    if (this.turn) this.floor = this.turn + 1;
+    this.turn = 0;
+    const turn = await host.chatSend(text);
+    if (this.turn === 0) this.turn = turn;
+  }
+
+  /** Events can arrive before chatSend resolves, so the first one of a new turn claims it. */
+  private accept(turn: number): boolean {
+    if (this.turn === 0 && turn >= this.floor) this.turn = turn;
+    return turn === this.turn;
   }
 
   private onDelta(chunk: string) {

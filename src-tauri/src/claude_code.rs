@@ -87,8 +87,13 @@ impl ClaudeCode {
         self.turn.fetch_add(1, Ordering::SeqCst);
     }
 
-    pub async fn send<R: Runtime>(&self, app: &AppHandle<R>, text: String, config: RunConfig) -> u64 {
-        let turn = self.turn.fetch_add(1, Ordering::SeqCst) + 1;
+    /// Claims the next turn number; pass it to `run`.
+    pub fn begin(&self) -> u64 {
+        self.turn.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// Streams one reply as chat-* events tagged with `turn`.
+    pub async fn run<R: Runtime>(&self, app: &AppHandle<R>, turn: u64, text: String, config: RunConfig) -> u64 {
         let error = |kind: &str, message: String| {
             let _ = app.emit("chat-error", ChatError { turn, message, kind: kind.into() });
         };
