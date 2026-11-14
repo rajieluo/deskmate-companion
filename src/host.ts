@@ -250,6 +250,24 @@ export function onVoiceChanged(cb: (enabled: boolean) => void) {
   else browserVoiceListeners.push(cb);
 }
 
+// --- Native voice output (Kokoro on ONNX Runtime; see src-tauri/src/tts.rs).
+
+/** Loads the native voice, downloading its model the first time. Resolves to the thread count. */
+export async function ttsPrepare(): Promise<number> {
+  if (!inTauri) throw new Error("the native voice needs the desktop app");
+  return invoke<number>("tts_prepare");
+}
+
+/** Runs Kokoro on token ids and a style vector; returns 24 kHz samples. */
+export async function ttsSynthesize(ids: number[], style: Float32Array, speed: number): Promise<Float32Array> {
+  const bytes = await invoke<ArrayBuffer>("tts_synthesize", { ids, style: Array.from(style), speed });
+  return new Float32Array(bytes);
+}
+
+export function onTtsProgress(cb: (percent: number) => void) {
+  if (inTauri) void listen<{ percent: number }>("tts-progress", (e) => cb(e.payload.percent));
+}
+
 // --- Voice input (whisper.cpp on the Rust side; see src-tauri/src/stt.rs).
 
 export async function sttPrepare() {

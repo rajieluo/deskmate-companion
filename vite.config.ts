@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
 // Cross-origin isolation lets the voice (onnxruntime WASM) use several CPU
@@ -17,6 +18,12 @@ export default defineConfig({
     headers: CROSS_ORIGIN_ISOLATION,
   },
   preview: { headers: CROSS_ORIGIN_ISOLATION },
+  resolve: {
+    // kokoro-js's browser bundle carries its own copy of transformers.js; its plain
+    // build imports @huggingface/transformers, so the worker can use the tokenizer
+    // and thread settings directly (see src/tts.worker.ts).
+    alias: [{ find: /^kokoro-js$/, replacement: fileURLToPath(new URL("./node_modules/kokoro-js/dist/kokoro.js", import.meta.url)) }],
+  },
   envPrefix: ["VITE_", "TAURI_ENV_"],
   // The text-to-speech worker uses ES module imports.
   worker: { format: "es" },

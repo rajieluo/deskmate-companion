@@ -14,6 +14,7 @@ mod claude_code;
 mod model;
 mod history;
 mod stt;
+mod tts;
 mod voices;
 
 use std::{sync::Arc, thread, time::Duration};
@@ -348,6 +349,29 @@ fn stt_settings<R: Runtime>(app: &AppHandle<R>) -> Result<(String, String, std::
 }
 
 /// Downloads the Whisper model ahead of time (no-op when it's already there).
+/// Loads the native voice (downloading its model the first time). Returns the thread count.
+#[tauri::command]
+async fn tts_prepare<R: Runtime>(app: AppHandle<R>, tts: State<'_, Arc<tts::Tts>>) -> Result<usize, String> {
+    tts.prepare(&app).await.inspect_err(|e| log::error!("native voice: {e}"))?;
+    Ok(tts::threads())
+}
+
+/// Runs the voice model; returns 24 kHz f32 little-endian samples as raw bytes.
+#[tauri::command]
+async fn tts_synthesize(
+    tts: State<'_, Arc<tts::Tts>>,
+    ids: Vec<i64>,
+    style: Vec<f32>,
+    speed: f32,
+) -> Result<tauri::ipc::Response, String> {
+    let tts = tts.inner().clone();
+    let audio = tauri::async_runtime::spawn_blocking(move || tts.synthesize(ids, style, speed))
+        .await
+        .map_err(|e| e.to_string())??;
+    let bytes: Vec<u8> = audio.iter().flat_map(|s| s.to_le_bytes()).collect();
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 #[tauri::command]
 async fn stt_prepare<R: Runtime>(app: AppHandle<R>, stt: State<'_, Arc<Stt>>) -> Result<(), String> {
     stt::check_cpu()?;
@@ -712,6 +736,7 @@ pub fn run() {
             let hotkeys = register_hotkeys(app.handle());
             app.manage(hotkeys);
             app.manage(Arc::new(Stt::default()));
+            app.manage(Arc::new(tts::Tts::default()));
             app.manage(Arc::new(History::new(app.path().app_data_dir()?)));
 
             build_tray(app.handle())?;
@@ -768,6 +793,8 @@ pub fn run() {
             chat_cancel,
             chat_reset,
             stt_prepare,
+            tts_prepare,
+            tts_synthesize,
             pick_claude_code_folder,
             transcribe,
             page_log,
