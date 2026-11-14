@@ -68,6 +68,8 @@ export interface LayoutOptions {
   top?: number;
   /** User zoom multiplier on top of the fitted scale. */
   zoom?: number;
+  /** Space kept free at the bottom (CSS px), e.g. for a hover shadow. */
+  bottom?: number;
 }
 
 /**
@@ -80,15 +82,15 @@ export function layout(
   nh: number,
   vw: number,
   vh: number,
-  { pad = 0.04, top = 0, zoom = 1 }: LayoutOptions = {},
+  { pad = 0.04, top = 0, zoom = 1, bottom = 0 }: LayoutOptions = {},
 ): Placement {
   const cw = Math.max(1e-6, (crop.x1 - crop.x0) * nw);
   const ch = Math.max(1e-6, (crop.y1 - crop.y0) * nh);
   const availW = vw * (1 - 2 * pad);
-  const availH = Math.max(1, vh - top - vh * pad);
+  const availH = Math.max(1, vh - top - bottom - vh * pad);
   const scale = Math.min(availW / cw, availH / ch) * zoom;
   const x = vw / 2 - ((crop.x0 + crop.x1) / 2) * nw * scale;
-  const y = vh - vh * pad * 0.25 - crop.y1 * nh * scale;
+  const y = vh - bottom - vh * pad * 0.25 - crop.y1 * nh * scale;
   return { scale, x, y };
 }
 

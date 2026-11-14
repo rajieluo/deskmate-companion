@@ -38,6 +38,11 @@ describe("layout", () => {
     expect(centre).toBeCloseTo(180);
   });
 
+  it("leaves room at the bottom when asked", () => {
+    const p = layout({ x0: 0, y0: 0, x1: 1, y1: 1 }, 100, 100, 100, 300, { pad: 0, bottom: 40 });
+    expect(p.y + 100 * p.scale).toBeCloseTo(260);
+  });
+
   it("leaves room at the top when asked", () => {
     const p = layout({ x0: 0, y0: 0, x1: 1, y1: 1 }, 100, 100, 100, 300, { pad: 0, top: 100 });
     expect(p.y).toBeGreaterThanOrEqual(100 - 1e-6);
