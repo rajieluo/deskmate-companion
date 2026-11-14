@@ -91,7 +91,7 @@ case $cmd in
         pane=$(herdr pane list 2>/dev/null | jq -r --arg want "$want" '
           [.result.panes[]?
            | select(((.agent // "") | ascii_downcase) == "claude")
-           | select(((.cwd // "") | gsub("\\\\"; "/") | rtrimstr("/") | split("/") | last) == $want)]
+           | select(((.cwd // "") | gsub("\\\\"; "/") | rtrimstr("/") | split("/") | last | ascii_downcase) == ($want | ascii_downcase))]
           | .[0].pane_id // empty' 2>/dev/null)
         if [ -n "$pane" ]; then
           herdr pane run "$pane" "You have a new avatar note: check your inbox." >/dev/null 2>&1 || true
