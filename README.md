@@ -25,6 +25,31 @@ npm run tauri build  # build an installer in src-tauri/target/release/bundle/nsi
 
 Every pull request also builds a Windows installer in CI; download it from the run's **Artifacts** section.
 
+### Building locally on Windows
+
+CI takes 20+ minutes; a local build is much faster (about 1 minute for the first Rust build on a recent PC, seconds after that).
+
+1. **Rust** (MSVC toolchain): `winget install Rustlang.Rustup`, then open a new terminal and run `rustup default stable-x86_64-pc-windows-msvc`.
+2. **C++ build tools**: Visual Studio 2022 or its Build Tools with the *Desktop development with C++* workload (MSVC and a Windows SDK). `winget install Microsoft.VisualStudio.2022.BuildTools`, then add the workload in the Visual Studio Installer.
+3. **A recent CMake** for whisper.cpp. Visual Studio ships one; if an older standalone CMake comes first on `PATH`, either `winget install Kitware.CMake`, or put the bundled one first for the session:
+   ```powershell
+   $env:Path = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin;$env:Path"
+   ```
+4. **libclang** (whisper-rs generates its bindings with it). Either `winget install LLVM.LLVM` (needs admin), or, without admin, take the DLL from the `libclang` Python wheel and point `LIBCLANG_PATH` at it:
+   ```powershell
+   python -m pip install --target "$env:LOCALAPPDATA\libclang-py" libclang
+   $env:LIBCLANG_PATH = "$env:LOCALAPPDATA\libclang-py\clang\native"
+   ```
+   Don't set `WHISPER_DONT_GENERATE_BINDINGS`: the bundled bindings are generated for Linux and fail to compile on Windows.
+5. **Node.js 22+** and WebView2 (already on Windows 10/11).
+
+Then `npm install` and `npm run tauri dev`. Close the installed Desktop Assistant first, or the two fight over the global hotkeys.
+
+Debugging tips:
+
+- Set `$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"` before `npm run tauri dev` to attach Edge DevTools (or a script) to the app's pages at `http://127.0.0.1:9222`.
+- If Vite is already running on port 1420, `cargo run` in `src-tauri/` starts just the app against it.
+
 ## Using it
 
 - **First run** loads `Documents\live2d models\1014100aqua\1014100.model3.json` if it exists. Otherwise it asks you to pick a `.model3.json` file.
