@@ -309,6 +309,8 @@ fn respond(status: StatusCode, mime: &str, body: Vec<u8>) -> Response<Vec<u8>> {
         .header(header::CONTENT_TYPE, mime)
         // The page (tauri.localhost) and model.localhost are different origins.
         .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+        // The page is cross-origin isolated (for multi-threaded voice).
+        .header("Cross-Origin-Resource-Policy", "cross-origin")
         .body(body)
         .expect("valid response")
 }

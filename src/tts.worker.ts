@@ -27,14 +27,14 @@ async function load(device: Device): Promise<KokoroTTS> {
   if (device === "gpu" && "gpu" in navigator) {
     try {
       const t = await KokoroTTS.from_pretrained(MODEL, { dtype: "fp32", device: "webgpu", progress_callback });
-      post({ type: "ready", device: "webgpu" });
+      post({ type: "ready", device: "webgpu", isolated: self.crossOriginIsolated, cores: navigator.hardwareConcurrency });
       return t;
     } catch (e) {
       console.warn("[tts] WebGPU unavailable, using CPU", e);
     }
   }
   const t = await KokoroTTS.from_pretrained(MODEL, { dtype: "q8", device: "wasm", progress_callback });
-  post({ type: "ready", device: "wasm" });
+  post({ type: "ready", device: "wasm", isolated: self.crossOriginIsolated, cores: navigator.hardwareConcurrency });
   return t;
 }
 
@@ -44,6 +44,7 @@ self.onmessage = async (e: MessageEvent<Request>) => {
     tts ??= load(gpuBroken ? "cpu" : (msg.device ?? "cpu"));
     let engine = await tts;
     if (msg.type !== "speak") return;
+    const started = performance.now();
     let out = await engine.generate(msg.text, { voice: msg.voice as never, speed: msg.speed });
     if (looksGarbled(out.audio as Float32Array) && !gpuBroken) {
       // Seen with WebGPU on some GPUs (e.g. an RX 7900 XT): switch to the CPU and redo this sentence.
@@ -54,7 +55,7 @@ self.onmessage = async (e: MessageEvent<Request>) => {
       out = await engine.generate(msg.text, { voice: msg.voice as never, speed: msg.speed });
     }
     const audio = out.audio as Float32Array;
-    post({ type: "audio", id: msg.id, audio, rate: out.sampling_rate }, [audio.buffer]);
+    post({ type: "audio", id: msg.id, audio, rate: out.sampling_rate, ms: performance.now() - started }, [audio.buffer]);
   } catch (err) {
     tts = null;
     post({ type: "error", id: msg.type === "speak" ? msg.id : -1, message: String((err as Error)?.message ?? err) });
