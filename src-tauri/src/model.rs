@@ -19,7 +19,7 @@ const DEFAULT_MODEL: &[&str] = &["live2d models", "1014100aqua", "1014100.model3
 #[serde(default)]
 pub struct Settings {
     pub model_path: Option<PathBuf>,
-    /// What the character calls itself. Default: "Aqua".
+    /// What the character calls itself. Default: taken from the model's folder name.
     pub character_name: Option<String>,
     /// Claude model id. Default: claude-opus-5-5.
     pub chat_model: Option<String>,
@@ -113,6 +113,18 @@ impl ModelStore {
             generation: inner.generation,
             look,
         })
+    }
+
+    /// What the character is called: `character_name` if set, else the model folder's name.
+    pub fn character_name(&self) -> String {
+        let s = self.settings();
+        s.character_name
+            .filter(|n| !n.trim().is_empty())
+            .or_else(|| {
+                let folder = s.model_path.as_ref()?.parent()?.file_name()?.to_string_lossy().into_owned();
+                name_from_folder(&folder)
+            })
+            .unwrap_or_else(|| "Assistant".into())
     }
 
     /// The folder holding the current model's .model3.json.
@@ -237,5 +249,37 @@ mod tests {
         assert!(resolve(&dir, "/3//etc/passwd").is_none());
         assert!(resolve(&dir, "/3/missing.json").is_none());
         assert!(resolve(&dir, "/no-generation").is_none());
+    }
+}
+
+/// A display name from a model folder name: "1014100aqua" -> "Aqua", "Nicole" -> "Nicole",
+/// "mori_suit" -> "Mori Suit", "weixi_2" -> "Weixi", "l2d01.u" -> "L2d01".
+pub fn name_from_folder(folder: &str) -> Option<String> {
+    let base = folder.strip_suffix(".u").unwrap_or(folder);
+    let base = base.trim_start_matches(|c: char| c.is_ascii_digit());
+    let words: Vec<String> = base
+        .split(|c: char| c == '_' || c == '-' || c == ' ' || c == '.')
+        .filter(|w| !w.is_empty() && !w.chars().all(|c| c.is_ascii_digit()))
+        .map(|w| {
+            let mut cs = w.chars();
+            cs.next().map(|f| f.to_uppercase().chain(cs).collect()).unwrap_or_default()
+        })
+        .collect();
+    (!words.is_empty()).then(|| words.join(" "))
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::name_from_folder;
+
+    #[test]
+    fn names_from_folders() {
+        assert_eq!(name_from_folder("1014100aqua").as_deref(), Some("Aqua"));
+        assert_eq!(name_from_folder("Nicole").as_deref(), Some("Nicole"));
+        assert_eq!(name_from_folder("jane").as_deref(), Some("Jane"));
+        assert_eq!(name_from_folder("mori_suit").as_deref(), Some("Mori Suit"));
+        assert_eq!(name_from_folder("weixi_2").as_deref(), Some("Weixi"));
+        assert_eq!(name_from_folder("l2d01.u").as_deref(), Some("L2d01"));
+        assert_eq!(name_from_folder("12345"), None);
     }
 }

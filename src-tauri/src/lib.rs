@@ -29,7 +29,6 @@ use tauri::{
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
-const DEFAULT_NAME: &str = "Aqua";
 
 /// Models offered in the tray's Model submenu: (menu id, model id, label).
 const MODEL_CHOICES: &[(&str, &str, &str)] = &[
@@ -74,7 +73,7 @@ fn chat_status(store: State<'_, Arc<ModelStore>>) -> ChatStatus {
     let s = store.settings();
     ChatStatus {
         has_key: chat::get_api_key().is_some(),
-        name: s.character_name.unwrap_or_else(|| DEFAULT_NAME.into()),
+        name: store.character_name(),
         model: s.chat_model.unwrap_or_else(|| chat::DEFAULT_MODEL.into()),
         voice_enabled: s.voice_enabled.unwrap_or(true),
         follow_mouse: s.follow_mouse.unwrap_or(true),
@@ -100,7 +99,7 @@ async fn chat_send<R: Runtime>(
     text: String,
 ) -> Result<u64, String> {
     let s = store.settings();
-    let name = s.character_name.clone().unwrap_or_else(|| DEFAULT_NAME.into());
+    let name = store.character_name();
     if s.brain.as_deref() == Some("claude_code") {
         let config = claude_code::RunConfig {
             folder: s.claude_code_folder.clone().unwrap_or_default(),

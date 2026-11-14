@@ -26,7 +26,7 @@ export class ChatUI {
   private tags = new TagStream();
   private sentences = new SentenceBuffer();
   private hideTimer: number | undefined;
-  private name = "Aqua";
+  private name = "Assistant";
 
   constructor(
     private avatar: Avatar,
@@ -66,10 +66,14 @@ export class ChatUI {
       this.say("Thanks! Say something to me.", 5000);
       this.open();
     });
-    void host.chatStatus().then((s) => {
-      this.name = s.name;
-      this.setMode(s.brain);
-    });
+    const refreshName = () =>
+      void host.chatStatus().then((s) => {
+        this.name = s.name;
+        this.setMode(s.brain);
+      });
+    refreshName();
+    // The name comes from the model's folder, so a new model can mean a new name.
+    host.onModelChanged(() => refreshName());
     host.onModelPicked((model) => this.say(`Chat model: ${model}`, 3000));
     host.onBrainChanged((brain) => {
       this.setMode(brain);
