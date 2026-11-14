@@ -733,6 +733,10 @@ pub fn run() {
                     log::warn!("window size {}x{} is too small; resetting", size.width, size.height);
                     let _ = window.set_size(tauri::LogicalSize::new(380.0, 720.0));
                     reset_position(&window);
+                } else {
+                    // The restored position can still hang off the screen (seen: a
+                    // 380x720 window at y=838 on a 1440 px tall screen).
+                    keep_on_screen(&window, size.width, size.height);
                 }
             }
             let store = app.state::<Arc<ModelStore>>().inner().clone();
