@@ -296,7 +296,7 @@ async fn chat_send<R: Runtime>(
         crew.start_polling(app.clone());
         // The first mate answers in her character too. (With per-model personas, prefer the
         // model's persona file over this setting.)
-        let persona = s.persona.clone().filter(|p| !p.trim().is_empty());
+        let persona = store.model_persona().or_else(|| s.persona.clone().filter(|p| !p.trim().is_empty()));
         tauri::async_runtime::spawn(async move {
             match crew.send(&app, &name, &text, persona.as_deref()).await {
                 Ok(said) => {
