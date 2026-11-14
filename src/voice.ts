@@ -1,4 +1,4 @@
-import { log } from "./host";
+import { inTauri, log, onTtsProgress, ttsPrepare, ttsSynthesize } from "./host";
 
 // Speaks reply text sentence by sentence and exposes a mouth-open level for lip sync.
 //
@@ -12,7 +12,10 @@ export interface SpeechEngine {
   synthesize(text: string): Promise<{ audio: Float32Array; rate: number }>;
 }
 
-/** Kokoro running in a Web Worker. */
+/**
+ * Kokoro: text processing in a Web Worker, and the model itself natively in the
+ * desktop app (falling back to WebAssembly in the worker).
+ */
 export class KokoroEngine implements SpeechEngine {
   private worker: Worker | null = null;
   private nextId = 0;
@@ -20,8 +23,9 @@ export class KokoroEngine implements SpeechEngine {
   onStatus: (status: string) => void = () => {};
   private timed = 0;
 
-  /** "cpu" (WASM) or "gpu" (WebGPU). Read when the model first loads. */
+  /** "cpu" (native in the app, else WASM) or "gpu" (WebGPU). Read when the model first loads. */
   device: "cpu" | "gpu" = "cpu";
+  private mode: Promise<"cpu" | "gpu" | "native"> | null = null;
 
   constructor(
     public voice = "af_heart",
@@ -35,10 +39,18 @@ export class KokoroEngine implements SpeechEngine {
       const m = e.data;
       if (m.type === "progress") this.onStatus(`Downloading voice… ${Math.round(m.progress)}%`);
       else if (m.type === "garbled") log("warn", "[voice] the GPU produced garbled audio; switched to the CPU");
+      else if (m.type === "native") {
+        // The worker asks for one model run; do it in Rust and hand the audio back.
+        ttsSynthesize(m.ids, m.style, m.speed).then(
+          (audio) => w.postMessage({ type: "native-result", id: m.id, audio }, [audio.buffer]),
+          (err) => w.postMessage({ type: "native-result", id: m.id, error: String(err) }),
+        );
+        return;
+      }
       else if (m.type === "ready") {
         // Without cross-origin isolation onnxruntime runs on a single thread, which is
         // slower than real time on many CPUs and leaves pauses between sentences.
-        log("info", `[voice] Kokoro running on ${m.device}; multi-threaded ${m.isolated} (${m.cores} cores)`);
+        log("info", `[voice] Kokoro running on ${m.device}${m.device === "wasm" ? `; ${m.threads} threads (${m.cores} cores, isolated ${m.isolated})` : ""}`);
         this.onStatus("");
       }
       else if (m.type === "audio") {
@@ -53,21 +65,40 @@ export class KokoroEngine implements SpeechEngine {
         log("error", `[voice] ${m.message}`);
         this.pending.get(m.id)?.reject(new Error(m.message));
       }
-      if (m.id !== undefined) this.pending.delete(m.id);
+      if ((m.type === "audio" || m.type === "error") && m.id !== undefined) this.pending.delete(m.id);
     };
     this.worker = w;
     return w;
   }
 
-  warmUp() {
-    this.ensure().postMessage({ type: "load", device: this.device });
+  /** Native in the desktop app unless WebGPU was asked for; WASM if the native voice won't load. */
+  private chooseMode() {
+    return (this.mode ??= (async () => {
+      if (!inTauri || this.device === "gpu") return this.device;
+      onTtsProgress((p) => this.onStatus(`Downloading voice… ${Math.floor(p)}%`));
+      try {
+        const threads = await ttsPrepare();
+        log("info", `[voice] native voice ready (${threads} threads)`);
+        return "native" as const;
+      } catch (e) {
+        log("warn", `[voice] native voice unavailable, using the slower built-in one: ${e}`);
+        return "cpu" as const;
+      } finally {
+        this.onStatus("");
+      }
+    })());
   }
 
-  synthesize(text: string) {
+  warmUp() {
+    void this.chooseMode().then((device) => this.ensure().postMessage({ type: "load", device }));
+  }
+
+  async synthesize(text: string) {
+    const device = await this.chooseMode();
     const id = ++this.nextId;
     return new Promise<{ audio: Float32Array; rate: number }>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.ensure().postMessage({ type: "speak", id, text, voice: this.voice, speed: this.speed, device: this.device });
+      this.ensure().postMessage({ type: "speak", id, text, voice: this.voice, speed: this.speed, device });
     });
   }
 }
