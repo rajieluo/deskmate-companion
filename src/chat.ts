@@ -197,10 +197,7 @@ export class ChatUI {
   private placeBubble() {
     const head = this.avatar.headTop();
     if (head === null) return;
-    // Keep clear of the text box and key field, which sit at the top of the window.
-    const below = [this.form, this.keyForm].filter((f) => !f.hidden).map((f) => f.offsetTop + f.offsetHeight);
-    const min = Math.max(8, ...below.map((b) => b + 8));
-    const top = Math.max(min, head + 16 - this.bubble.offsetHeight);
+    const top = Math.max(8, head + 16 - this.bubble.offsetHeight);
     this.bubble.style.top = `${Math.round(top)}px`;
   }
 
