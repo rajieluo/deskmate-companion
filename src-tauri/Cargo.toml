@@ -26,4 +26,4 @@ futures-util = "0.3"
 keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native"] }
 tauri-plugin-global-shortcut = "2"
 whisper-rs = "0.16"
-tokio = { version = "1", features = ["sync", "process", "io-util"] }
+tokio = { version = "1", features = ["sync", "process", "io-util", "time"] }

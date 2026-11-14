@@ -79,6 +79,118 @@ body[data-brain="claude_code"] #chat input {
   border-color: #d97757;
 }
 
+body[data-brain="crew"] #chat input {
+  border-color: #4f7cff;
+}
+
+/* Crew mode: one badge per firstmate task, down her right side. */
+#crew {
+  position: fixed;
+  right: 8px;
+  top: 28%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 4px;
+  border-radius: 12px;
+  background: rgba(20, 26, 50, 0.35);
+}
+
+#crew .badge {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+#crew .badge.working {
+  background: #4f7cff;
+  animation: crew-pulse 1.6s ease-in-out infinite;
+}
+#crew .badge.attention {
+  background: #f2a20c;
+  animation: crew-pulse 0.9s ease-in-out infinite;
+}
+#crew .badge.ready {
+  background: #2fb36b;
+}
+#crew .badge.failed {
+  background: #e0464e;
+}
+#crew .badge.idle {
+  background: #9aa0b8;
+}
+
+@keyframes crew-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #crew .badge {
+    animation: none !important;
+  }
+}
+
+#crew-card {
+  position: fixed;
+  right: 36px;
+  left: 14px;
+  top: 28%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #1d2340;
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: 0 4px 14px rgba(20, 30, 70, 0.25);
+}
+
+#crew-card p {
+  margin: 0 0 4px;
+  overflow-wrap: anywhere;
+}
+
+#crew-card .title {
+  font-weight: 600;
+}
+
+#crew-card .meta {
+  font-size: 12px;
+  color: #6b7090;
+}
+#crew-card .meta.attention {
+  color: #b87400;
+}
+#crew-card .meta.failed {
+  color: #c0343c;
+}
+
+#crew-card .text {
+  max-height: 72px;
+  overflow-y: auto;
+}
+
+#crew-card .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+#crew-card button {
+  padding: 3px 8px;
+  border: 1px solid #c9cde0;
+  border-radius: 8px;
+  background: #f4f5fb;
+  color: #1d2340;
+  font-size: 12px;
+  cursor: pointer;
+}
+
 #bubble.thinking #bubble-text::after {
   content: "…";
   animation: blink 1s steps(2) infinite;

@@ -1,5 +1,6 @@
 import { Avatar } from "./avatar";
 import { ChatUI } from "./chat";
+import { CrewUI } from "./crew";
 import { PosePicker } from "./picker";
 import * as host from "./host";
 import { EMOTIONS } from "./motions";
@@ -18,6 +19,8 @@ avatar.setMouthSource(() => voice.level());
 (window as unknown as { voice: Voice }).voice = voice;
 const poses = new PosePicker(avatar);
 const chat = new ChatUI(avatar, voice);
+const crew = new CrewUI();
+chat.onModeChange = (brain) => crew.setEnabled(brain === "crew");
 kokoro.onStatus = (s) => chat.status(s);
 void host.chatStatus().then((s) => {
   voice.enabled = s.voice_enabled;
