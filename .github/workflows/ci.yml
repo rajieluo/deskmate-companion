@@ -1,13 +1,20 @@
 name: CI
 
+# Fast checks only. The Windows installer build lives in installer.yml and runs
+# by hand, because Windows runners use GitHub Actions minutes twice as fast.
 on:
   push:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  windows:
-    runs-on: windows-latest
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -15,14 +22,6 @@ jobs:
         with:
           node-version: 22
           cache: npm
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-          # Bump when the ggml build flags in .cargo/config.toml change, so whisper.cpp is rebuilt.
-          prefix-key: v1-ggml-portable
 
       - name: Install (downloads Live2D Cubism Core)
         run: npm ci
@@ -32,16 +31,3 @@ jobs:
 
       - name: Unit tests (web)
         run: npm test
-
-      - name: Unit tests (Rust)
-        run: cargo test --manifest-path src-tauri/Cargo.toml
-
-      - name: Build Windows installer
-        run: npx tauri build
-
-      - name: Upload installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: desktop-assistant-windows
-          path: src-tauri/target/release/bundle/nsis/*.exe
-          retention-days: 14
