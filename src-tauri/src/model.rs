@@ -191,6 +191,39 @@ impl ModelStore {
     }
 }
 
+/// Motion and expression files in a model folder (relative paths with "/"), so
+/// files the .model3.json doesn't list (common with VTube Studio models) can be
+/// offered too. Looks three folders deep and stops at 500 files.
+pub fn list_model_files(dir: &Path) -> Vec<String> {
+    fn walk(root: &Path, dir: &Path, depth: u32, out: &mut Vec<String>) {
+        let Ok(entries) = fs::read_dir(dir) else { return };
+        let mut entries: Vec<_> = entries.flatten().collect();
+        entries.sort_by_key(|e| e.file_name());
+        for e in entries {
+            if out.len() >= 500 {
+                return;
+            }
+            let path = e.path();
+            if path.is_dir() {
+                if depth < 3 {
+                    walk(root, &path, depth + 1, out);
+                }
+                continue;
+            }
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            if name.ends_with(".motion3.json") || name.ends_with(".exp3.json") {
+                if let Ok(rel) = path.strip_prefix(root) {
+                    let parts: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+                    out.push(parts.join("/"));
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, dir, 0, &mut out);
+    out
+}
+
 /// Maps a request path onto a file inside `dir`, refusing anything that escapes it.
 pub fn resolve(dir: &Path, uri_path: &str) -> Option<PathBuf> {
     let trimmed = uri_path.trim_start_matches('/');
@@ -241,6 +274,16 @@ mod tests {
         fs::write(dir.join(".physics3.json"), "{}").unwrap();
         fs::write(dir.parent().unwrap().join("secret.txt"), "x").unwrap();
         dir
+    }
+
+    #[test]
+    fn lists_motion_and_expression_files() {
+        let dir = temp_model();
+        fs::write(dir.join("Love eye.exp3.json"), "{}").unwrap();
+        let files = list_model_files(&dir);
+        assert!(files.contains(&"motions/00_Wait_01.motion3.json".to_string()), "{files:?}");
+        assert!(files.contains(&"Love eye.exp3.json".to_string()), "{files:?}");
+        assert!(!files.iter().any(|f| f.ends_with("model3.json") && !f.ends_with("motion3.json")));
     }
 
     #[test]

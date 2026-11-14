@@ -202,6 +202,12 @@ fn set_voice_enabled<R: Runtime>(app: AppHandle<R>, on: bool) {
     set_voice(&app, on);
 }
 
+/// Motion and expression files in the current model's folder.
+#[tauri::command]
+fn model_files(store: State<'_, Arc<ModelStore>>) -> Vec<String> {
+    store.current_dir().map(|d| model::list_model_files(&d)).unwrap_or_default()
+}
+
 /// Lets the page write to the log file (diagnostics, errors).
 #[tauri::command]
 fn page_log(level: String, message: String) {
@@ -658,6 +664,7 @@ pub fn run() {
             pick_claude_code_folder,
             transcribe,
             page_log,
+            model_files,
             history_append,
             history_read,
             history_clear,

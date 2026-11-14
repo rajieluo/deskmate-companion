@@ -171,6 +171,13 @@ export function setVoiceEnabled(on: boolean) {
 
 const browserVoiceListeners: ((on: boolean) => void)[] = [];
 
+/** Motion and expression files in the current model's folder (relative paths). */
+export async function modelFiles(): Promise<string[]> {
+  if (inTauri) return invoke<string[]>("model_files").catch(() => []);
+  // Browser dev mode: ?files=a.exp3.json,b.motion3.json
+  return (new URLSearchParams(location.search).get("files") ?? "").split(",").filter(Boolean);
+}
+
 /** Writes a line to the app's log file (and the console). */
 export function log(level: "info" | "warn" | "error", message: string) {
   (level === "info" ? console.info : level === "warn" ? console.warn : console.error)(message);

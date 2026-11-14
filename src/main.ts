@@ -1,5 +1,6 @@
 import { Avatar } from "./avatar";
 import { ChatUI } from "./chat";
+import { PosePicker } from "./picker";
 import * as host from "./host";
 import { EMOTIONS } from "./motions";
 import { BeepEngine, KokoroEngine, Voice } from "./voice";
@@ -15,6 +16,7 @@ const useBeep = !host.inTauri && new URLSearchParams(location.search).get("tts")
 const voice = new Voice(useBeep ? new BeepEngine() : kokoro);
 avatar.setMouthSource(() => voice.level());
 (window as unknown as { voice: Voice }).voice = voice;
+const poses = new PosePicker(avatar);
 const chat = new ChatUI(avatar, voice);
 kokoro.onStatus = (s) => chat.status(s);
 void host.chatStatus().then((s) => {
@@ -61,7 +63,9 @@ async function load(source: host.ModelSource | null) {
   }
   showStatus("Loading model…");
   try {
-    const summary = await avatar.load(source.url, source.look, source.params);
+    const files = await host.modelFiles();
+    const summary = await avatar.load(source.url, source.look, source.params, files);
+    await poses.restore(source.label);
     showStatus(null);
     host.log("info", `[avatar] loaded ${source.label}: ${JSON.stringify(summary)}; look ${JSON.stringify(avatar.lookParams)}`);
     // A second later, once idle motions have started, record the mouth state.
