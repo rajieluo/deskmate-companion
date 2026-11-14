@@ -29,8 +29,72 @@ use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, Runtime, State, WebviewWindow,
 };
 use tauri_plugin_dialog::DialogExt;
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
+
+/// Default global hotkeys. Ctrl+Shift+M and Ctrl+Shift+U were taken by another
+/// app on the developer's PC, so listen and mute use Ctrl+Alt.
+const DEFAULT_HOTKEYS: [(&str, &str); 3] = [("talk", "Ctrl+Shift+Space"), ("listen", "Ctrl+Alt+M"), ("mute", "Ctrl+Alt+U")];
+
+/// The hotkeys in use: action name -> (label as typed, parsed shortcut if it registered).
+#[derive(Default, Clone, Serialize)]
+struct Hotkeys {
+    talk: String,
+    listen: String,
+    mute: String,
+    #[serde(skip)]
+    ids: Vec<(u32, &'static str)>,
+}
+
+impl Hotkeys {
+    fn label(&self, action: &str) -> &str {
+        match action {
+            "talk" => &self.talk,
+            "listen" => &self.listen,
+            _ => &self.mute,
+        }
+    }
+}
+
+/// Registers the hotkeys from settings (or the defaults), logging any that are
+/// malformed or already taken by another app.
+fn register_hotkeys<R: Runtime>(app: &AppHandle<R>) -> Hotkeys {
+    let configured = app.state::<Arc<ModelStore>>().settings().hotkeys.unwrap_or_default();
+    let mut keys = Hotkeys::default();
+    for (action, default) in DEFAULT_HOTKEYS {
+        let text = configured.get(action).cloned().unwrap_or_else(|| default.to_string());
+        let mut label = text.clone();
+        if !text.trim().is_empty() {
+            match text.parse::<Shortcut>() {
+                Ok(shortcut) => match app.global_shortcut().register(shortcut) {
+                    Ok(()) => keys.ids.push((shortcut.id(), action)),
+                    Err(e) => {
+                        log::warn!("hotkey {action} = {text} is not available: {e}");
+                        label.clear();
+                    }
+                },
+                Err(e) => {
+                    log::warn!("hotkey {action} = {text} is not a valid shortcut: {e}");
+                    label.clear();
+                }
+            }
+        }
+        match action {
+            "talk" => keys.talk = label,
+            "listen" => keys.listen = label,
+            _ => keys.mute = label,
+        }
+    }
+    keys
+}
+
+/// Menu label with its hotkey, if it has one: "Speak to her (Ctrl+Alt+M)".
+fn with_hotkey<R: Runtime>(app: &AppHandle<R>, text: &str, action: &str) -> String {
+    match app.try_state::<Hotkeys>().map(|h| h.label(action).to_string()) {
+        Some(k) if !k.is_empty() => format!("{text} ({k})"),
+        _ => text.to_string(),
+    }
+}
 
 /// Models offered in the tray's Model submenu: (menu id, model id, label).
 const MODEL_CHOICES: &[(&str, &str, &str)] = &[
@@ -60,6 +124,8 @@ fn get_model(store: State<'_, Arc<ModelStore>>) -> Option<ModelInfo> {
 #[derive(Serialize)]
 struct ChatStatus {
     has_key: bool,
+    /// Hotkey labels ("" when unset or unavailable).
+    hotkeys: Hotkeys,
     name: String,
     model: String,
     voice_enabled: bool,
@@ -147,10 +213,11 @@ fn page_log(level: String, message: String) {
 }
 
 #[tauri::command]
-fn chat_status(store: State<'_, Arc<ModelStore>>) -> ChatStatus {
+fn chat_status(store: State<'_, Arc<ModelStore>>, hotkeys: State<'_, Hotkeys>) -> ChatStatus {
     let s = store.settings();
     ChatStatus {
         has_key: chat::get_api_key().is_some(),
+        hotkeys: hotkeys.inner().clone(),
         name: store.character_name(),
         model: s.chat_model.unwrap_or_else(|| chat::DEFAULT_MODEL.into()),
         voice_enabled: s.voice_enabled.unwrap_or(true),
@@ -363,12 +430,12 @@ fn spawn_cursor_poller<R: Runtime>(window: WebviewWindow<R>) {
 fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let choose = MenuItem::with_id(app, "choose", "Choose model…", true, None::<&str>)?;
     let reset = MenuItem::with_id(app, "reset", "Reset position", true, None::<&str>)?;
-    let talk = MenuItem::with_id(app, "talk", "Type to her (Ctrl+Shift+Space)", true, None::<&str>)?;
-    let listen = MenuItem::with_id(app, "listen", "Speak to her (Ctrl+Shift+M)", true, None::<&str>)?;
+    let talk = MenuItem::with_id(app, "talk", with_hotkey(app, "Type to her", "talk"), true, None::<&str>)?;
+    let listen = MenuItem::with_id(app, "listen", with_hotkey(app, "Speak to her", "listen"), true, None::<&str>)?;
     let forget = MenuItem::with_id(app, "forget", "Forget conversation", true, None::<&str>)?;
     let key = MenuItem::with_id(app, "key", "Set API key…", true, None::<&str>)?;
     let voice_on = app.state::<Arc<ModelStore>>().settings().voice_enabled.unwrap_or(true);
-    let voice = CheckMenuItem::with_id(app, "voice", "Speak replies (Ctrl+Shift+U mutes)", true, voice_on, None::<&str>)?;
+    let voice = CheckMenuItem::with_id(app, "voice", with_hotkey(app, "Speak replies", "mute"), true, voice_on, None::<&str>)?;
     app.manage(VoiceItem(voice.clone()));
     let history_item = MenuItem::with_id(app, "history", "Chat history…", true, None::<&str>)?;
     let follow_on = app.state::<Arc<ModelStore>>().settings().follow_mouse.unwrap_or(true);
@@ -515,15 +582,20 @@ pub fn run() {
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
-                    if event.state() == ShortcutState::Pressed {
-                        if shortcut.key == Code::KeyM {
-                            start_listening(app);
-                        } else if shortcut.key == Code::KeyU {
+                    if event.state() != ShortcutState::Pressed {
+                        return;
+                    }
+                    let action = app
+                        .try_state::<Hotkeys>()
+                        .and_then(|h| h.ids.iter().find(|(id, _)| *id == shortcut.id()).map(|(_, a)| *a));
+                    match action {
+                        Some("listen") => start_listening(app),
+                        Some("mute") => {
                             let on = !app.state::<Arc<ModelStore>>().settings().voice_enabled.unwrap_or(true);
                             set_voice(app, on);
-                        } else {
-                            open_chat(app);
                         }
+                        Some("talk") => open_chat(app),
+                        _ => {}
                     }
                 })
                 .build(),
@@ -549,14 +621,8 @@ pub fn run() {
             app.manage(Arc::new(Chat::default()));
             app.manage(Arc::new(ClaudeCode::default()));
 
-            let talk = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
-            let listen = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyM);
-            let mute = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyU);
-            for shortcut in [talk, listen, mute] {
-                if let Err(e) = app.global_shortcut().register(shortcut) {
-                    log::warn!("could not register {shortcut:?}: {e}");
-                }
-            }
+            let hotkeys = register_hotkeys(app.handle());
+            app.manage(hotkeys);
             app.manage(Arc::new(Stt::default()));
             app.manage(Arc::new(History::new(app.path().app_data_dir()?)));
 
@@ -600,4 +666,19 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Desktop Assistant");
+}
+
+#[cfg(test)]
+mod hotkey_tests {
+    use super::DEFAULT_HOTKEYS;
+    use tauri_plugin_global_shortcut::Shortcut;
+
+    #[test]
+    fn default_hotkeys_parse() {
+        for (_, text) in DEFAULT_HOTKEYS {
+            assert!(text.parse::<Shortcut>().is_ok(), "{text}");
+        }
+        assert!("Ctrl+Shift+M".parse::<Shortcut>().is_ok());
+        assert!("Nope+Q".parse::<Shortcut>().is_err());
+    }
 }

@@ -102,6 +102,8 @@ export async function resizeWindow(factor: number) {
 // --- Claude chat (runs on the Rust side; see src-tauri/src/chat.rs).
 
 export interface ChatStatus {
+  /** Global hotkey labels; "" when unset or taken by another app. */
+  hotkeys: { talk: string; listen: string; mute: string };
   has_key: boolean;
   name: string;
   model: string;
@@ -177,7 +179,7 @@ export function log(level: "info" | "warn" | "error", message: string) {
 
 export async function chatStatus(): Promise<ChatStatus> {
   if (!inTauri) {
-    return { has_key: true, name: "Aqua", model: "demo", voice_enabled: true, follow_mouse: true, fade_bottom: true, voice: "af_heart", voice_speed: 1, voice_device: "cpu", brain: "api", claude_code_folder: null };
+    return { hotkeys: { talk: "Ctrl+Shift+Space", listen: "Ctrl+Alt+M", mute: "Ctrl+Alt+U" }, has_key: true, name: "Aqua", model: "demo", voice_enabled: true, follow_mouse: true, fade_bottom: true, voice: "af_heart", voice_speed: 1, voice_device: "cpu", brain: "api", claude_code_folder: null };
   }
   return invoke<ChatStatus>("chat_status");
 }

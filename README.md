@@ -58,9 +58,9 @@ Debugging tips:
 - **Click** her (or press **Ctrl+Shift+Space** anywhere) to open the chat box. Type and press Enter; Esc closes it.
 - The first time you chat she asks for an [Anthropic API key](https://console.anthropic.com/settings/keys). It is stored in Windows Credential Manager, never in a file. `ANTHROPIC_API_KEY` in the environment also works. *Set API key…* in the tray changes it.
 - *Forget conversation* in the tray starts a fresh conversation.
-- **Talk to her out loud**: press the microphone button in the chat box, or **Ctrl+Shift+M** from anywhere. Speak, and she stops listening after a short pause. Your words are transcribed locally with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) and sent as a message. The first time, the Whisper model (`base.en`, about 140 MB) downloads into `%APPDATA%\com.rajieluo.desktopassistant\whisper\`. Windows may ask for microphone permission once.
+- **Talk to her out loud**: press the microphone button in the chat box, or **Ctrl+Alt+M** from anywhere. Speak, and she stops listening after a short pause. Your words are transcribed locally with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) and sent as a message. The first time, the Whisper model (`base.en`, about 140 MB) downloads into `%APPDATA%\com.rajieluo.desktopassistant\whisper\`. Windows may ask for microphone permission once.
 - She **speaks her replies** with [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), running locally, and her mouth follows the audio. The voice model (about 90 MB) downloads from Hugging Face the first time and is cached after that. It runs on the CPU by default (see `voice_device` below).
-- **Mute** her with the speaker button in the chat box, **Ctrl+Shift+U** from anywhere, or *Speak replies* in the tray. All three stay in step, and the choice is remembered.
+- **Mute** her with the speaker button in the chat box, **Ctrl+Alt+U** from anywhere, or *Speak replies* in the tray. All three stay in step, and the choice is remembered.
 - **Chat history**: the clock button in the chat box, or *Chat history…* in the tray, opens a window with every message, grouped by day and searchable. Messages are saved to `%APPDATA%\com.rajieluo.desktopassistant\history.jsonl`; *Clear…* in that window deletes them.
 - **Ctrl + mouse wheel** over her makes the window bigger or smaller.
 - **Keys 1 to 7** (after clicking her) play happy, sad, angry, surprised, shy, thinking and proud, so you can check a model's motions.
@@ -107,6 +107,7 @@ Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistan
 - `voice_device`: where the voice runs, `"cpu"` (default) or `"gpu"`. The GPU is faster, but on some cards (an RX 7900 XT, for one) it garbles the speech; when that happens the app notices and switches back to the CPU by itself.
 - `model_params`: parameter values to hold on a model every frame, keyed by its folder name, e.g. `"model_params": { "Nicole": { "MouthJawOpen": 0 } }`. Lip sync still moves the mouth while she speaks. The log lists each model's mouth parameters and their values when it loads.
 - `fade_bottom`: softly fade out the bottom edge of the figure (default `true`), for models whose art stops at the legs. The tray has a **Fade bottom edge** checkbox for it.
+- `hotkeys`: the global hotkeys, e.g. `{ "talk": "Ctrl+Shift+Space", "listen": "Ctrl+Alt+M", "mute": "Ctrl+Alt+U" }` (those are the defaults). Use `""` to turn one off. If another app already uses a combination, the log says so and the tray shows no hotkey for it.
 - `follow_mouse`: whether her head and eyes follow the cursor (default `true`). The tray has a **Follow the mouse** checkbox for it.
 - `look_params`: which parameters follow the mouse, per model folder. The app finds the head, eye and
   body parameters by name on its own, in both the `ParamAngleX` and the older `PARAM_ANGLE_X` styles. For a
