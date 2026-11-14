@@ -38,6 +38,18 @@ Every pull request also builds a Windows installer in CI; download it from the r
 - **Ctrl + mouse wheel** over her makes the window bigger or smaller.
 - **Keys 1 to 7** (after clicking her) play happy, sad, angry, surprised, shy, thinking and proud, so you can check a model's motions.
 
+## Claude Code mode
+
+Instead of plain chat, she can be a voice and face for [Claude Code](https://claude.com/claude-code) working in a folder of yours (a code project, notes, anything).
+
+1. Install Claude Code and run `claude` once in a terminal to sign in. This mode uses that login (your Claude subscription), not an API key.
+2. In the tray, pick **Claude Code folder…** and choose the folder. That switches on **Claude Code mode** (toggle it in the tray to go back to normal chat).
+3. Talk or type as usual: "what does this project do?", "add a test for the parser", "fix the failing build".
+
+Each message runs `claude -p` in that folder and continues the same Claude Code session until you pick *Forget conversation*. While it works, the bubble shows what it's doing ("Reading main.ts…", "Running npm test…"), and the reply is spoken and drives her emotions like in normal chat.
+
+Permissions: there is no one to click "Allow" in this mode, so it runs with `acceptEdits` by default. Claude Code can read and edit files in the folder, but shell commands outside its safe list are refused. Change `claude_code_permission_mode` in `settings.json` to `auto` (lets Claude Code's classifier allow safe commands) or another mode if you want more.
+
 ## Chat settings
 
 Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistant\` (created on first run). Edit it while the app is closed:
@@ -53,7 +65,10 @@ Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistan
   "voice": "af_heart",
   "voice_speed": 1.0,
   "stt_model": "base.en",
-  "stt_language": "en"
+  "stt_language": "en",
+  "brain": "api",
+  "claude_code_folder": null,
+  "claude_code_permission_mode": "acceptEdits"
 }
 ```
 

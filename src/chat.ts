@@ -11,6 +11,7 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 export class ChatUI {
   private bubble = $<HTMLDivElement>("bubble");
   private bubbleText = $<HTMLParagraphElement>("bubble-text");
+  private activity = $<HTMLParagraphElement>("bubble-activity");
   private form = $<HTMLFormElement>("chat");
   private input = $<HTMLInputElement>("chat-input");
   private keyForm = $<HTMLFormElement>("api-key");
@@ -31,6 +32,7 @@ export class ChatUI {
     host.onChat({
       delta: (turn, text) => turn === this.turn && this.onDelta(text),
       done: (turn) => turn === this.turn && this.onDone(),
+      activity: (turn, text) => turn === this.turn && this.onActivity(text),
       error: (turn, kind, message) => turn === this.turn && this.onError(kind, message),
     });
     host.onEvent("open-chat", () => this.open());
@@ -63,7 +65,16 @@ export class ChatUI {
     });
     void host.chatStatus().then((s) => {
       this.name = s.name;
-      this.input.placeholder = `Talk to ${s.name}…`;
+      this.setMode(s.brain);
+    });
+    host.onBrainChanged((brain) => {
+      this.setMode(brain);
+      this.say(
+        brain === "claude_code"
+          ? "Claude Code mode: I'll work in your folder with Claude Code."
+          : "Back to normal chat.",
+        4000,
+      );
     });
   }
 
@@ -130,9 +141,14 @@ export class ChatUI {
     }
   }
 
+  private setMode(brain: string) {
+    document.body.dataset.brain = brain;
+    this.input.placeholder = brain === "claude_code" ? `Ask ${this.name} to code…` : `Talk to ${this.name}…`;
+  }
+
   async send(text: string) {
     const status = await host.chatStatus();
-    if (!status.has_key) {
+    if (status.brain === "api" && !status.has_key) {
       this.askForKey();
       return;
     }
@@ -141,6 +157,7 @@ export class ChatUI {
     this.voice.stop();
     this.say("…");
     this.bubbleText.textContent = "";
+    this.activity.hidden = true;
     this.bubble.classList.add("thinking");
     this.turn = await host.chatSend(text);
   }
@@ -155,7 +172,17 @@ export class ChatUI {
     }
   }
 
+  /** Claude Code tool use: shown as a small grey line under the reply. */
+  private onActivity(text: string) {
+    this.activity.textContent = `${text}…`;
+    this.activity.hidden = false;
+    this.bubble.hidden = false;
+    this.bubble.setAttribute("data-hit", "");
+    this.placeBubble();
+  }
+
   private onDone() {
+    this.activity.hidden = true;
     const rest = this.tags.end().text;
     this.append(rest);
     for (const s of [...this.sentences.push(rest), ...this.sentences.flush()]) this.voice.say(speakable(s));
@@ -166,6 +193,12 @@ export class ChatUI {
 
   private onError(kind: string, message: string) {
     this.bubble.classList.remove("thinking");
+    this.activity.hidden = true;
+    if (kind === "no_folder") {
+      this.say("Which folder should I work in?", 6000);
+      void host.pickClaudeCodeFolder();
+      return;
+    }
     if (kind === "cancelled") return;
     if (kind === "no_key" || kind === "auth") {
       this.askForKey(kind === "auth" ? "That API key didn't work." : undefined);

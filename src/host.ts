@@ -95,9 +95,13 @@ export interface ChatStatus {
   voice_enabled: boolean;
   voice: string;
   voice_speed: number;
+  brain: "api" | "claude_code";
+  claude_code_folder: string | null;
 }
 export interface ChatHandlers {
   delta: (turn: number, text: string) => void;
+  /** A tool Claude Code is using, e.g. "Reading main.ts". */
+  activity: (turn: number, text: string) => void;
   done: (turn: number) => void;
   error: (turn: number, kind: string, message: string) => void;
 }
@@ -107,7 +111,7 @@ let browserHandlers: ChatHandlers | null = null;
 
 export async function chatStatus(): Promise<ChatStatus> {
   if (!inTauri) {
-    return { has_key: true, name: "Aqua", model: "demo", voice_enabled: true, voice: "af_heart", voice_speed: 1 };
+    return { has_key: true, name: "Aqua", model: "demo", voice_enabled: true, voice: "af_heart", voice_speed: 1, brain: "api", claude_code_folder: null };
   }
   return invoke<ChatStatus>("chat_status");
 }
@@ -143,6 +147,7 @@ export function onChat(handlers: ChatHandlers) {
   if (!inTauri) return;
   void listen<{ turn: number; text: string }>("chat-delta", (e) => handlers.delta(e.payload.turn, e.payload.text));
   void listen<{ turn: number }>("chat-done", (e) => handlers.done(e.payload.turn));
+  void listen<{ turn: number; text: string }>("chat-activity", (e) => handlers.activity(e.payload.turn, e.payload.text));
   void listen<{ turn: number; kind: string; message: string }>("chat-error", (e) =>
     handlers.error(e.payload.turn, e.payload.kind, e.payload.message),
   );
@@ -170,4 +175,13 @@ export async function transcribe(samples: Float32Array): Promise<string> {
 
 export function onSttProgress(cb: (percent: number) => void) {
   if (inTauri) void listen<{ percent: number }>("stt-progress", (e) => cb(e.payload.percent));
+}
+
+export async function pickClaudeCodeFolder(): Promise<string | null> {
+  if (!inTauri) return null;
+  return invoke<string | null>("pick_claude_code_folder");
+}
+
+export function onBrainChanged(cb: (brain: string) => void) {
+  if (inTauri) void listen<string>("brain-changed", (e) => cb(e.payload));
 }

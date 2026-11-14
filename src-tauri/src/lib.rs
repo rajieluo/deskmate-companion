@@ -10,12 +10,14 @@
 //! * the Claude chat (see `chat.rs`), so the API key never reaches the page.
 
 mod chat;
+mod claude_code;
 mod model;
 mod stt;
 
 use std::{sync::Arc, thread, time::Duration};
 
 use chat::{Chat, ChatConfig};
+use claude_code::ClaudeCode;
 use model::{ModelInfo, ModelStore};
 use stt::Stt;
 use serde::Serialize;
@@ -50,6 +52,9 @@ struct ChatStatus {
     voice_enabled: bool,
     voice: String,
     voice_speed: f32,
+    /// "api" or "claude_code"
+    brain: String,
+    claude_code_folder: Option<String>,
 }
 
 #[tauri::command]
@@ -62,6 +67,8 @@ fn chat_status(store: State<'_, Arc<ModelStore>>) -> ChatStatus {
         voice_enabled: s.voice_enabled.unwrap_or(true),
         voice: s.voice.unwrap_or_else(|| "af_heart".into()),
         voice_speed: s.voice_speed.unwrap_or(1.0).clamp(0.5, 2.0),
+        brain: s.brain.unwrap_or_else(|| "api".into()),
+        claude_code_folder: s.claude_code_folder.map(|p| p.display().to_string()),
     }
 }
 
@@ -75,10 +82,24 @@ async fn chat_send<R: Runtime>(
     app: AppHandle<R>,
     chat: State<'_, Arc<Chat>>,
     store: State<'_, Arc<ModelStore>>,
+    code: State<'_, Arc<ClaudeCode>>,
     text: String,
 ) -> Result<u64, String> {
     let s = store.settings();
-    let name = s.character_name.unwrap_or_else(|| DEFAULT_NAME.into());
+    let name = s.character_name.clone().unwrap_or_else(|| DEFAULT_NAME.into());
+    if s.brain.as_deref() == Some("claude_code") {
+        let config = claude_code::RunConfig {
+            folder: s.claude_code_folder.clone().unwrap_or_default(),
+            permission_mode: s
+                .claude_code_permission_mode
+                .clone()
+                .unwrap_or_else(|| claude_code::DEFAULT_PERMISSION_MODE.into()),
+            prompt_file: app.path().app_config_dir().map_err(|e| e.to_string())?.join("avatar-prompt.txt"),
+            name,
+        };
+        let code = code.inner().clone();
+        return Ok(code.send(&app, text, config).await);
+    }
     let config = ChatConfig {
         model: s.chat_model.unwrap_or_else(|| chat::DEFAULT_MODEL.into()),
         effort: s.chat_effort.unwrap_or_else(|| chat::DEFAULT_EFFORT.into()),
@@ -89,13 +110,45 @@ async fn chat_send<R: Runtime>(
 }
 
 #[tauri::command]
-fn chat_cancel(chat: State<'_, Arc<Chat>>) {
+fn chat_cancel(chat: State<'_, Arc<Chat>>, code: State<'_, Arc<ClaudeCode>>) {
     chat.cancel();
+    code.cancel();
 }
 
 #[tauri::command]
-fn chat_reset(chat: State<'_, Arc<Chat>>) {
+fn chat_reset(chat: State<'_, Arc<Chat>>, code: State<'_, Arc<ClaudeCode>>) {
     chat.reset();
+    code.reset();
+}
+
+/// Lets the user pick the folder Claude Code works in, and switches to Claude Code mode.
+#[tauri::command]
+async fn pick_claude_code_folder<R: Runtime>(app: AppHandle<R>) -> Result<Option<String>, String> {
+    choose_claude_code_folder(&app)
+}
+
+fn choose_claude_code_folder<R: Runtime>(app: &AppHandle<R>) -> Result<Option<String>, String> {
+    let store = app.state::<Arc<ModelStore>>();
+    let mut dialog = app.dialog().file().set_title("Choose the folder Claude Code should work in");
+    if let Some(dir) = store.settings().claude_code_folder {
+        dialog = dialog.set_directory(dir);
+    }
+    let Some(picked) = dialog.blocking_pick_folder() else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|e| e.to_string())?;
+    store.update(|s| {
+        s.claude_code_folder = Some(path.clone());
+        s.brain = Some("claude_code".into());
+    });
+    app.state::<Arc<ClaudeCode>>().reset();
+    let _ = app.emit("brain-changed", "claude_code");
+    Ok(Some(path.display().to_string()))
+}
+
+fn set_brain<R: Runtime>(app: &AppHandle<R>, brain: &str) {
+    app.state::<Arc<ModelStore>>().update(|s| s.brain = Some(brain.into()));
+    let _ = app.emit("brain-changed", brain);
 }
 
 fn stt_settings<R: Runtime>(app: &AppHandle<R>) -> Result<(String, String, std::path::PathBuf), String> {
@@ -214,12 +267,16 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let key = MenuItem::with_id(app, "key", "Set API key…", true, None::<&str>)?;
     let voice_on = app.state::<Arc<ModelStore>>().settings().voice_enabled.unwrap_or(true);
     let voice = CheckMenuItem::with_id(app, "voice", "Speak replies", true, voice_on, None::<&str>)?;
+    let code_on = app.state::<Arc<ModelStore>>().settings().brain.as_deref() == Some("claude_code");
+    let code = CheckMenuItem::with_id(app, "code", "Claude Code mode", true, code_on, None::<&str>)?;
+    let code_folder = MenuItem::with_id(app, "code_folder", "Claude Code folder…", true, None::<&str>)?;
+    let sep3 = PredefinedMenuItem::separator(app)?;
     let reload = MenuItem::with_id(app, "reload", "Reload", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let menu =
-        Menu::with_items(app, &[&talk, &listen, &voice, &forget, &key, &sep, &choose, &reset, &reload, &sep2, &quit])?;
+        Menu::with_items(app, &[&talk, &listen, &voice, &forget, &sep3, &code, &code_folder, &key, &sep, &choose, &reset, &reload, &sep2, &quit])?;
 
     let mut tray = TrayIconBuilder::with_id("main")
         .tooltip("Desktop Assistant")
@@ -245,6 +302,26 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 let on = !store.settings().voice_enabled.unwrap_or(true);
                 store.update(|s| s.voice_enabled = Some(on));
                 let _ = app.emit("voice-changed", on);
+            }
+            "code" => {
+                let store = app.state::<Arc<ModelStore>>();
+                let s = store.settings();
+                if s.brain.as_deref() == Some("claude_code") {
+                    set_brain(app, "api");
+                } else if s.claude_code_folder.as_ref().is_some_and(|f| f.is_dir()) {
+                    set_brain(app, "claude_code");
+                } else {
+                    let app = app.clone();
+                    thread::spawn(move || {
+                        let _ = choose_claude_code_folder(&app);
+                    });
+                }
+            }
+            "code_folder" => {
+                let app = app.clone();
+                thread::spawn(move || {
+                    let _ = choose_claude_code_folder(&app);
+                });
             }
             "key" => {
                 open_chat(app);
@@ -301,6 +378,7 @@ pub fn run() {
             store.save();
             app.manage(store);
             app.manage(Arc::new(Chat::default()));
+            app.manage(Arc::new(ClaudeCode::default()));
 
             let talk = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
             let listen = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyM);
@@ -330,6 +408,7 @@ pub fn run() {
             chat_cancel,
             chat_reset,
             stt_prepare,
+            pick_claude_code_folder,
             transcribe
         ])
         .run(tauri::generate_context!())
