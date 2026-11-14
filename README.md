@@ -76,6 +76,7 @@ Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistan
 - `chat_effort`: `low` (default, quick chatty replies), `medium`, `high`, `xhigh` or `max`.
 - `voice_enabled`, `voice`, `voice_speed`: speech on or off, the Kokoro voice (`af_heart` by default; also `af_bella`, `af_nicole`, `af_sky`, `bf_emma` and [others](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md)) and speed (0.5 to 2).
 - `stt_model`, `stt_language`: the Whisper model for voice input (`tiny.en`, `base.en` by default, `small.en` for better accuracy, or multilingual `small` with `"stt_language": "auto"`) and the spoken language.
+- `follow_mouse`: whether her head and eyes follow the cursor (default `true`). The tray has a **Follow the mouse** checkbox for it.
 - `look_params`: which parameters follow the mouse, per model folder. The app finds the head, eye and
   body parameters by name on its own, in both the `ParamAngleX` and the older `PARAM_ANGLE_X` styles. For a
   model with generic names like `Param12`, name them yourself, e.g.

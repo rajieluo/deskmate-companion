@@ -19,11 +19,13 @@ const chat = new ChatUI(avatar, voice);
 kokoro.onStatus = (s) => chat.status(s);
 void host.chatStatus().then((s) => {
   voice.enabled = s.voice_enabled;
+  avatar.setFollowMouse(s.follow_mouse);
   kokoro.voice = s.voice;
   kokoro.speed = s.voice_speed;
   // Start the (large, first-time) model download early instead of on the first reply.
   if (s.voice_enabled && !useBeep) kokoro.warmUp();
 });
+host.onFollowMouseChanged((on) => avatar.setFollowMouse(on));
 host.onVoiceChanged((on) => {
   voice.enabled = on;
   if (!on) voice.stop();

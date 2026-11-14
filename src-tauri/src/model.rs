@@ -48,6 +48,8 @@ pub struct Settings {
     /// model's folder name, e.g. {"xch003_01": {"angle_x": "Param12"}}. Keys:
     /// angle_x, angle_y, angle_z, eye_x, eye_y, body_x. Use "" to turn one off.
     pub look_params: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Head and eyes follow the mouse cursor. Default: true.
+    pub follow_mouse: Option<bool>,
 }
 
 #[derive(Clone, Serialize)]

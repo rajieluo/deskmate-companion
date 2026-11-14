@@ -216,9 +216,17 @@ export class Avatar {
     for (const id of this.lipSyncIds) core.setParameterValueById(id, v);
   }
 
+  private followMouse = true;
+
+  /** Turns cursor following on or off; off, she looks straight ahead. */
+  setFollowMouse(on: boolean) {
+    this.followMouse = on;
+    if (!on) this.model?.internalModel.focusController.focus(0, 0);
+  }
+
   /** Makes the character look towards a point in CSS pixels. */
   lookAt(x: number, y: number) {
-    this.model?.focus(x, y);
+    if (this.followMouse) this.model?.focus(x, y);
   }
 }
 

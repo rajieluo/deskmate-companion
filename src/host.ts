@@ -100,6 +100,7 @@ export interface ChatStatus {
   name: string;
   model: string;
   voice_enabled: boolean;
+  follow_mouse: boolean;
   voice: string;
   voice_speed: number;
   brain: "api" | "claude_code";
@@ -118,7 +119,7 @@ let browserHandlers: ChatHandlers | null = null;
 
 export async function chatStatus(): Promise<ChatStatus> {
   if (!inTauri) {
-    return { has_key: true, name: "Aqua", model: "demo", voice_enabled: true, voice: "af_heart", voice_speed: 1, brain: "api", claude_code_folder: null };
+    return { has_key: true, name: "Aqua", model: "demo", voice_enabled: true, follow_mouse: true, voice: "af_heart", voice_speed: 1, brain: "api", claude_code_folder: null };
   }
   return invoke<ChatStatus>("chat_status");
 }
@@ -162,6 +163,10 @@ export function onChat(handlers: ChatHandlers) {
 
 export function onEvent(name: "open-chat" | "open-api-key" | "chat-reset" | "start-listening", cb: () => void) {
   if (inTauri) void listen(name, () => cb());
+}
+
+export function onFollowMouseChanged(cb: (on: boolean) => void) {
+  if (inTauri) void listen<boolean>("follow-mouse-changed", (e) => cb(e.payload));
 }
 
 export function onVoiceChanged(cb: (enabled: boolean) => void) {

@@ -60,6 +60,7 @@ struct ChatStatus {
     name: String,
     model: String,
     voice_enabled: bool,
+    follow_mouse: bool,
     voice: String,
     voice_speed: f32,
     /// "api" or "claude_code"
@@ -75,6 +76,7 @@ fn chat_status(store: State<'_, Arc<ModelStore>>) -> ChatStatus {
         name: s.character_name.unwrap_or_else(|| DEFAULT_NAME.into()),
         model: s.chat_model.unwrap_or_else(|| chat::DEFAULT_MODEL.into()),
         voice_enabled: s.voice_enabled.unwrap_or(true),
+        follow_mouse: s.follow_mouse.unwrap_or(true),
         voice: s.voice.unwrap_or_else(|| "af_heart".into()),
         voice_speed: s.voice_speed.unwrap_or(1.0).clamp(0.5, 2.0),
         brain: s.brain.unwrap_or_else(|| "api".into()),
@@ -287,6 +289,8 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let key = MenuItem::with_id(app, "key", "Set API key…", true, None::<&str>)?;
     let voice_on = app.state::<Arc<ModelStore>>().settings().voice_enabled.unwrap_or(true);
     let voice = CheckMenuItem::with_id(app, "voice", "Speak replies", true, voice_on, None::<&str>)?;
+    let follow_on = app.state::<Arc<ModelStore>>().settings().follow_mouse.unwrap_or(true);
+    let follow = CheckMenuItem::with_id(app, "follow", "Follow the mouse", true, follow_on, None::<&str>)?;
     let code_on = app.state::<Arc<ModelStore>>().settings().brain.as_deref() == Some("claude_code");
     let code = CheckMenuItem::with_id(app, "code", "Claude Code mode", true, code_on, None::<&str>)?;
     let code_folder = MenuItem::with_id(app, "code_folder", "Claude Code folder…", true, None::<&str>)?;
@@ -309,7 +313,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let menu =
-        Menu::with_items(app, &[&talk, &listen, &voice, &forget, &sep3, &model_menu, &code, &code_folder, &key, &sep, &choose, &reset, &reload, &sep2, &quit])?;
+        Menu::with_items(app, &[&talk, &listen, &voice, &forget, &sep3, &model_menu, &code, &code_folder, &key, &sep, &choose, &follow, &reset, &reload, &sep2, &quit])?;
 
     let mut tray = TrayIconBuilder::with_id("main")
         .tooltip("Desktop Assistant")
@@ -335,6 +339,12 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 let on = !store.settings().voice_enabled.unwrap_or(true);
                 store.update(|s| s.voice_enabled = Some(on));
                 let _ = app.emit("voice-changed", on);
+            }
+            "follow" => {
+                let store = app.state::<Arc<ModelStore>>();
+                let on = !store.settings().follow_mouse.unwrap_or(true);
+                store.update(|s| s.follow_mouse = Some(on));
+                let _ = app.emit("follow-mouse-changed", on);
             }
             "code" => {
                 let store = app.state::<Arc<ModelStore>>();
