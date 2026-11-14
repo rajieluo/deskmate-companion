@@ -440,7 +440,7 @@ pub struct Crew {
 impl Crew {
     pub fn tasks(&self) -> Vec<Task> {
         let mut list: Vec<Task> = self.state.lock().unwrap().tasks.values().cloned().collect();
-        list.sort_by(|a, b| b.updated.cmp(&a.updated));
+        list.sort_by_key(|t| std::cmp::Reverse(t.updated));
         list
     }
 
@@ -499,7 +499,7 @@ impl Crew {
         };
 
         let mut said = Vec::new();
-        let mut new_replies = Vec::new();
+        let new_replies: Vec<Reply>;
         let mut changed = false;
         {
             let mut s = self.state.lock().unwrap();
