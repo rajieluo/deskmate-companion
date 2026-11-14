@@ -1,0 +1,55 @@
+name: Windows installer
+
+# Run from the Actions tab ("Run workflow"), or by pushing a v* tag. Not on every
+# push: a Windows build takes ~15 minutes, counted double against the monthly
+# Actions allowance.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: installer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          # Bump when the ggml build flags in .cargo/config.toml change, so whisper.cpp is rebuilt.
+          prefix-key: v1-ggml-portable
+
+      - name: Install (downloads Live2D Cubism Core)
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests (web)
+        run: npm test
+
+      - name: Unit tests (Rust)
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build Windows installer
+        run: npx tauri build
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-assistant-windows
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          retention-days: 14
