@@ -11,11 +11,11 @@ It runs in a small transparent, always-on-top window. Clicks pass through to wha
 | 1. Transparent on-top window, Live2D model idling, drag, click-through | done |
 | 2. Typed chat with Claude (streaming), emotion tags drive motions | done |
 | 3. Local Kokoro TTS with lip sync | done |
-| 4. Local whisper.cpp voice input | planned |
+| 4. Local whisper.cpp voice input | done |
 
 ## Running it
 
-You need [Node.js 22+](https://nodejs.org/), [Rust](https://rustup.rs/) and the [Tauri prerequisites for Windows](https://v2.tauri.app/start/prerequisites/#windows) (WebView2 is already on Windows 10/11).
+You need [Node.js 22+](https://nodejs.org/), [Rust](https://rustup.rs/), the [Tauri prerequisites for Windows](https://v2.tauri.app/start/prerequisites/#windows) (WebView2 is already on Windows 10/11), and for building whisper.cpp, [CMake](https://cmake.org/download/) and [LLVM](https://github.com/llvm/llvm-project/releases) (`winget install Kitware.CMake LLVM.LLVM`).
 
 ```powershell
 npm install          # also downloads the Live2D Cubism Core runtime
@@ -33,6 +33,7 @@ Every pull request also builds a Windows installer in CI; download it from the r
 - **Click** her (or press **Ctrl+Shift+Space** anywhere) to open the chat box. Type and press Enter; Esc closes it.
 - The first time you chat she asks for an [Anthropic API key](https://console.anthropic.com/settings/keys). It is stored in Windows Credential Manager, never in a file. `ANTHROPIC_API_KEY` in the environment also works. *Set API key…* in the tray changes it.
 - *Forget conversation* in the tray starts a fresh conversation.
+- **Talk to her out loud**: press the microphone button in the chat box, or **Ctrl+Shift+M** from anywhere. Speak, and she stops listening after a short pause. Your words are transcribed locally with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) and sent as a message. The first time, the Whisper model (`base.en`, about 140 MB) downloads into `%APPDATA%\com.rajieluo.desktopassistant\whisper\`. Windows may ask for microphone permission once.
 - She **speaks her replies** with [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), running locally, and her mouth follows the audio. The voice model (about 90 MB) downloads from Hugging Face the first time and is cached after that. It uses the GPU through WebGPU when available, otherwise the CPU. *Speak replies* in the tray turns the voice on or off.
 - **Ctrl + mouse wheel** over her makes the window bigger or smaller.
 - **Keys 1 to 7** (after clicking her) play happy, sad, angry, surprised, shy, thinking and proud, so you can check a model's motions.
@@ -50,13 +51,16 @@ Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistan
   "persona": null,
   "voice_enabled": true,
   "voice": "af_heart",
-  "voice_speed": 1.0
+  "voice_speed": 1.0,
+  "stt_model": "base.en",
+  "stt_language": "en"
 }
 ```
 
 - `chat_model`: any Claude model id. The default is Claude Opus 5.5. `claude-haiku-5-5` is much cheaper and faster if replies are good enough for you.
 - `chat_effort`: `low` (default, quick chatty replies), `medium`, `high`, `xhigh` or `max`.
 - `voice_enabled`, `voice`, `voice_speed`: speech on or off, the Kokoro voice (`af_heart` by default; also `af_bella`, `af_nicole`, `af_sky`, `bf_emma` and [others](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md)) and speed (0.5 to 2).
+- `stt_model`, `stt_language`: the Whisper model for voice input (`tiny.en`, `base.en` by default, `small.en` for better accuracy, or multilingual `small` with `"stt_language": "auto"`) and the spoken language.
 - `persona`: replaces the built-in personality prompt. Keep the line asking for one emotion tag per reply (`[happy] [sad] [angry] [surprised] [shy] [thinking] [proud] [neutral]`), since the tags are what make her move.
 
 Claude starts each reply with an emotion tag such as `[happy]`. The app strips the tags from the text and plays the matching motion. The API call is made from the Rust side, so the key never reaches the web page. Server-side refusal fallbacks are turned on, so if Claude Opus 5.5 declines a message the API retries it on a fallback model in the same call.
@@ -89,4 +93,5 @@ Tauri can only make a whole window ignore the mouse. So the Rust side polls the 
 
 - [Live2D Cubism Core](https://www.live2d.com/en/sdk/license/) is downloaded at install time and is subject to the Live2D Proprietary Software License. It is free for individuals and small businesses.
 - [pixi-live2d-display](https://github.com/guansss/pixi-live2d-display) (MIT) renders the models.
+- [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT) through [whisper-rs](https://github.com/tazz4843/whisper-rs) (Unlicense) does speech to text.
 - [kokoro-js](https://www.npmjs.com/package/kokoro-js) (Apache-2.0) and the Kokoro-82M model (Apache-2.0) do text to speech.

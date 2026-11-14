@@ -148,10 +148,26 @@ export function onChat(handlers: ChatHandlers) {
   );
 }
 
-export function onEvent(name: "open-chat" | "open-api-key" | "chat-reset", cb: () => void) {
+export function onEvent(name: "open-chat" | "open-api-key" | "chat-reset" | "start-listening", cb: () => void) {
   if (inTauri) void listen(name, () => cb());
 }
 
 export function onVoiceChanged(cb: (enabled: boolean) => void) {
   if (inTauri) void listen<boolean>("voice-changed", (e) => cb(e.payload));
+}
+
+// --- Voice input (whisper.cpp on the Rust side; see src-tauri/src/stt.rs).
+
+export async function sttPrepare() {
+  if (inTauri) await invoke("stt_prepare");
+}
+
+export async function transcribe(samples: Float32Array): Promise<string> {
+  if (!inTauri) return `(heard ${(samples.length / 16000).toFixed(1)} s of audio; transcription needs the desktop app)`;
+  const bytes = new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength);
+  return invoke<string>("transcribe", bytes);
+}
+
+export function onSttProgress(cb: (percent: number) => void) {
+  if (inTauri) void listen<{ percent: number }>("stt-progress", (e) => cb(e.payload.percent));
 }

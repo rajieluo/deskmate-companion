@@ -11,11 +11,13 @@
 
 mod chat;
 mod model;
+mod stt;
 
 use std::{sync::Arc, thread, time::Duration};
 
 use chat::{Chat, ChatConfig};
 use model::{ModelInfo, ModelStore};
+use stt::Stt;
 use serde::Serialize;
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
@@ -96,6 +98,40 @@ fn chat_reset(chat: State<'_, Arc<Chat>>) {
     chat.reset();
 }
 
+fn stt_settings<R: Runtime>(app: &AppHandle<R>) -> Result<(String, String, std::path::PathBuf), String> {
+    let s = app.state::<Arc<ModelStore>>().settings();
+    let name = s.stt_model.unwrap_or_else(|| stt::DEFAULT_MODEL.into());
+    let language = s.stt_language.unwrap_or_else(|| "en".into());
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("whisper");
+    Ok((name, language, dir))
+}
+
+/// Downloads the Whisper model ahead of time (no-op when it's already there).
+#[tauri::command]
+async fn stt_prepare<R: Runtime>(app: AppHandle<R>, stt: State<'_, Arc<Stt>>) -> Result<(), String> {
+    let (name, _, dir) = stt_settings(&app)?;
+    stt.ensure_model(&app, &dir, &name).await.map(|_| ())
+}
+
+/// Transcribes raw 16 kHz mono f32 samples sent as the request body.
+#[tauri::command]
+async fn transcribe<R: Runtime>(
+    app: AppHandle<R>,
+    stt: State<'_, Arc<Stt>>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected raw audio bytes".into());
+    };
+    let samples = stt::samples_from_bytes(bytes);
+    let (name, language, dir) = stt_settings(&app)?;
+    let path = stt.ensure_model(&app, &dir, &name).await?;
+    let stt = stt.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || stt.transcribe(&name, &path, &samples, &language))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Brings the window forward and opens the chat box.
 fn open_chat<R: Runtime>(app: &AppHandle<R>) {
     if let Some(w) = app.get_webview_window("main") {
@@ -104,6 +140,11 @@ fn open_chat<R: Runtime>(app: &AppHandle<R>) {
         let _ = w.set_focus();
         let _ = w.emit_to(w.label(), "open-chat", ());
     }
+}
+
+fn start_listening<R: Runtime>(app: &AppHandle<R>) {
+    open_chat(app);
+    let _ = app.emit("start-listening", ());
 }
 
 #[tauri::command]
@@ -167,7 +208,8 @@ fn spawn_cursor_poller<R: Runtime>(window: WebviewWindow<R>) {
 fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let choose = MenuItem::with_id(app, "choose", "Choose model…", true, None::<&str>)?;
     let reset = MenuItem::with_id(app, "reset", "Reset position", true, None::<&str>)?;
-    let talk = MenuItem::with_id(app, "talk", "Talk (Ctrl+Shift+Space)", true, None::<&str>)?;
+    let talk = MenuItem::with_id(app, "talk", "Type to her (Ctrl+Shift+Space)", true, None::<&str>)?;
+    let listen = MenuItem::with_id(app, "listen", "Speak to her (Ctrl+Shift+M)", true, None::<&str>)?;
     let forget = MenuItem::with_id(app, "forget", "Forget conversation", true, None::<&str>)?;
     let key = MenuItem::with_id(app, "key", "Set API key…", true, None::<&str>)?;
     let voice_on = app.state::<Arc<ModelStore>>().settings().voice_enabled.unwrap_or(true);
@@ -177,7 +219,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let menu =
-        Menu::with_items(app, &[&talk, &voice, &forget, &key, &sep, &choose, &reset, &reload, &sep2, &quit])?;
+        Menu::with_items(app, &[&talk, &listen, &voice, &forget, &key, &sep, &choose, &reset, &reload, &sep2, &quit])?;
 
     let mut tray = TrayIconBuilder::with_id("main")
         .tooltip("Desktop Assistant")
@@ -193,6 +235,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 });
             }
             "talk" => open_chat(app),
+            "listen" => start_listening(app),
             "forget" => {
                 app.state::<Arc<Chat>>().reset();
                 let _ = app.emit("chat-reset", ());
@@ -234,9 +277,13 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
+                .with_handler(|app, shortcut, event| {
                     if event.state() == ShortcutState::Pressed {
-                        open_chat(app);
+                        if shortcut.key == Code::KeyM {
+                            start_listening(app);
+                        } else {
+                            open_chat(app);
+                        }
                     }
                 })
                 .build(),
@@ -256,9 +303,13 @@ pub fn run() {
             app.manage(Arc::new(Chat::default()));
 
             let talk = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
-            if let Err(e) = app.global_shortcut().register(talk) {
-                eprintln!("could not register Ctrl+Shift+Space: {e}");
+            let listen = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyM);
+            for shortcut in [talk, listen] {
+                if let Err(e) = app.global_shortcut().register(shortcut) {
+                    eprintln!("could not register {shortcut:?}: {e}");
+                }
             }
+            app.manage(Arc::new(Stt::default()));
 
             build_tray(app.handle())?;
 
@@ -277,7 +328,9 @@ pub fn run() {
             set_api_key,
             chat_send,
             chat_cancel,
-            chat_reset
+            chat_reset,
+            stt_prepare,
+            transcribe
         ])
         .run(tauri::generate_context!())
         .expect("error while running Desktop Assistant");
