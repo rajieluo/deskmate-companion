@@ -185,3 +185,7 @@ export async function pickClaudeCodeFolder(): Promise<string | null> {
 export function onBrainChanged(cb: (brain: string) => void) {
   if (inTauri) void listen<string>("brain-changed", (e) => cb(e.payload));
 }
+
+export function onModelPicked(cb: (model: string) => void) {
+  if (inTauri) void listen<string>("model-picked", (e) => cb(e.payload));
+}

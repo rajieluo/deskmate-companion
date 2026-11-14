@@ -67,6 +67,7 @@ export class ChatUI {
       this.name = s.name;
       this.setMode(s.brain);
     });
+    host.onModelPicked((model) => this.say(`Chat model: ${model}`, 3000));
     host.onBrainChanged((brain) => {
       this.setMode(brain);
       this.say(

@@ -22,7 +22,7 @@ use model::{ModelInfo, ModelStore};
 use stt::Stt;
 use serde::Serialize;
 use tauri::{
-    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::TrayIconBuilder,
     AppHandle, Emitter, Manager, PhysicalPosition, Runtime, State, WebviewWindow,
 };
@@ -30,6 +30,16 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 const DEFAULT_NAME: &str = "Aqua";
+
+/// Models offered in the tray's Model submenu: (menu id, model id, label).
+const MODEL_CHOICES: &[(&str, &str, &str)] = &[
+    ("model:claude-opus-5-5", "claude-opus-5-5", "Claude Opus 5.5 (smartest)"),
+    ("model:claude-sonnet-5-5", "claude-sonnet-5-5", "Claude Sonnet 5.5"),
+    ("model:claude-haiku-5-5", "claude-haiku-5-5", "Claude Haiku 5.5 (fastest, cheapest)"),
+];
+
+/// The Model submenu's items, kept so the check mark can move when one is picked.
+struct ModelMenu<R: Runtime>(Vec<CheckMenuItem<R>>);
 
 #[derive(Clone, Serialize, PartialEq)]
 struct CursorEvent {
@@ -271,12 +281,25 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let code = CheckMenuItem::with_id(app, "code", "Claude Code mode", true, code_on, None::<&str>)?;
     let code_folder = MenuItem::with_id(app, "code_folder", "Claude Code folder…", true, None::<&str>)?;
     let sep3 = PredefinedMenuItem::separator(app)?;
+    let current_model = app
+        .state::<Arc<ModelStore>>()
+        .settings()
+        .chat_model
+        .unwrap_or_else(|| chat::DEFAULT_MODEL.into());
+    let mut model_items = Vec::new();
+    for (id, model, label) in MODEL_CHOICES {
+        model_items.push(CheckMenuItem::with_id(app, *id, *label, true, current_model == *model, None::<&str>)?);
+    }
+    let model_refs: Vec<&dyn tauri::menu::IsMenuItem<R>> =
+        model_items.iter().map(|i| i as &dyn tauri::menu::IsMenuItem<R>).collect();
+    let model_menu = Submenu::with_items(app, "Chat model", true, &model_refs)?;
+    app.manage(ModelMenu(model_items.clone()));
     let reload = MenuItem::with_id(app, "reload", "Reload", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let menu =
-        Menu::with_items(app, &[&talk, &listen, &voice, &forget, &sep3, &code, &code_folder, &key, &sep, &choose, &reset, &reload, &sep2, &quit])?;
+        Menu::with_items(app, &[&talk, &listen, &voice, &forget, &sep3, &model_menu, &code, &code_folder, &key, &sep, &choose, &reset, &reload, &sep2, &quit])?;
 
     let mut tray = TrayIconBuilder::with_id("main")
         .tooltip("Desktop Assistant")
@@ -338,6 +361,16 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 }
             }
             "quit" => app.exit(0),
+            id if id.starts_with("model:") => {
+                let model = id.trim_start_matches("model:").to_string();
+                app.state::<Arc<ModelStore>>().update(|s| s.chat_model = Some(model.clone()));
+                if let Some(menu) = app.try_state::<ModelMenu<R>>() {
+                    for (item, (item_id, _, _)) in menu.0.iter().zip(MODEL_CHOICES) {
+                        let _ = item.set_checked(*item_id == id);
+                    }
+                }
+                let _ = app.emit("model-picked", model);
+            }
             _ => {}
         });
     if let Some(icon) = app.default_window_icon() {
