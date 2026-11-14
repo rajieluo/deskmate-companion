@@ -114,7 +114,16 @@ Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistan
   `"look_params": { "xch003_01": { "angle_x": "Param12", "angle_y": "Param13", "eye_x": "Param20" } }`.
   The keys are `angle_x`, `angle_y`, `angle_z`, `eye_x`, `eye_y`, `body_x` and `breath`, and `""` turns one off.
   The parameters chosen for the current model are printed in the dev tools console as "mouse-follow parameters".
-- `persona`: replaces the built-in personality prompt. Keep the line asking for one emotion tag per reply (`[happy] [sad] [angry] [surprised] [shy] [thinking] [proud] [neutral]`), since the tags are what make her move.
+- `persona`: replaces the built-in personality prompt for every model. Keep the line asking for one emotion tag per reply (`[happy] [sad] [angry] [surprised] [shy] [thinking] [proud] [neutral]`), since the tags are what make her move. A per-model persona file (below) takes priority.
+
+### Per-model personas
+
+Each model can have its own personality. Put a plain text file in either place (the first one found wins):
+
+1. `%APPDATA%\com.rajieluo.desktopassistant\personas\<model folder name>.md`, e.g. `personas\Nicole.md`
+2. `persona.md` inside the model's own folder, e.g. `Documents\live2d models\Nicole\persona.md`
+
+`.txt` works too. Describe who the character is, how they talk and how they treat you. You don't need to repeat the reply rules: the app always adds the short-reply and emotion-tag instructions, and a reminder to stay genuinely helpful. In Claude Code mode the persona only shapes her tone and spoken summaries, not the quality of the work. The file is read on every message, so edits apply from the next reply. Persona files for characters you don't own stay on your machine; don't commit them here.
 
 Claude starts each reply with an emotion tag such as `[happy]`. The app strips the tags from the text and plays the matching motion. The API call is made from the Rust side, so the key never reaches the web page. Server-side refusal fallbacks are turned on, so if Claude Opus 5.5 declines a message the API retries it on a fallback model in the same call.
 

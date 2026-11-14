@@ -136,6 +136,11 @@ impl ModelStore {
             .unwrap_or_else(|| "Assistant".into())
     }
 
+    /// The current model's persona file, if it has one. See `find_persona`.
+    pub fn model_persona(&self) -> Option<String> {
+        find_persona(self.settings_file.parent()?, &self.current_dir()?)
+    }
+
     /// The folder holding the current model's .model3.json.
     pub fn current_dir(&self) -> Option<PathBuf> {
         let inner = self.inner.lock().unwrap();
@@ -263,6 +268,26 @@ mod tests {
 
 /// A display name from a model folder name: "1014100aqua" -> "Aqua", "Nicole" -> "Nicole",
 /// "mori_suit" -> "Mori Suit", "weixi_2" -> "Weixi", "l2d01.u" -> "L2d01".
+/// A model's own personality, read fresh on every message so edits apply right away.
+/// Looks for `personas\<model folder name>.md` (or `.txt`) in the app's config folder,
+/// then `persona.md` (or `.txt`) inside the model's folder.
+pub fn find_persona(config_dir: &Path, model_dir: &Path) -> Option<String> {
+    let folder = model_dir.file_name()?.to_string_lossy().into_owned();
+    let personas = config_dir.join("personas");
+    let candidates = [
+        personas.join(format!("{folder}.md")),
+        personas.join(format!("{folder}.txt")),
+        model_dir.join("persona.md"),
+        model_dir.join("persona.txt"),
+    ];
+    candidates.iter().find_map(|p| {
+        let text = fs::read_to_string(p).ok()?;
+        // Notepad may save a byte-order mark.
+        let text = text.trim_start_matches('\u{feff}').trim();
+        (!text.is_empty()).then(|| text.to_string())
+    })
+}
+
 pub fn name_from_folder(folder: &str) -> Option<String> {
     let base = folder.strip_suffix(".u").unwrap_or(folder);
     let base = base.trim_start_matches(|c: char| c.is_ascii_digit());
@@ -275,6 +300,32 @@ pub fn name_from_folder(folder: &str) -> Option<String> {
         })
         .collect();
     (!words.is_empty()).then(|| words.join(" "))
+}
+
+#[cfg(test)]
+mod persona_tests {
+    use super::find_persona;
+    use std::fs;
+
+    #[test]
+    fn finds_persona_files_in_order() {
+        let root = std::env::temp_dir().join(format!("persona-test-{}", std::process::id()));
+        let config = root.join("config");
+        let model = root.join("models").join("Nicole");
+        fs::create_dir_all(config.join("personas")).unwrap();
+        fs::create_dir_all(&model).unwrap();
+        assert_eq!(find_persona(&config, &model), None);
+
+        fs::write(model.join("persona.md"), "\u{feff}  From the model folder.\n").unwrap();
+        assert_eq!(find_persona(&config, &model).as_deref(), Some("From the model folder."));
+
+        fs::write(config.join("personas").join("Nicole.md"), "From the config folder.").unwrap();
+        assert_eq!(find_persona(&config, &model).as_deref(), Some("From the config folder."));
+
+        fs::write(config.join("personas").join("Nicole.md"), "   ").unwrap();
+        assert_eq!(find_persona(&config, &model).as_deref(), Some("From the model folder."));
+        fs::remove_dir_all(&root).unwrap();
+    }
 }
 
 #[cfg(test)]
