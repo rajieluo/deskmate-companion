@@ -19,6 +19,8 @@ export class Avatar {
   private loadId = 0;
   summary: MotionSummary | null = null;
   zoom = 1;
+  /** CSS px kept free above the character for the speech bubble. */
+  topReserve = 150;
 
   constructor(canvas: HTMLCanvasElement) {
     this.app = new PIXI.Application({
@@ -122,9 +124,17 @@ export class Avatar {
     const { width: vw, height: vh } = this.app.screen;
     const p = layout(this.crop, model.internalModel.width, model.internalModel.height, vw, vh, {
       zoom: this.zoom,
+      top: this.topReserve,
     });
     model.scale.set(p.scale);
     model.position.set(p.x, p.y);
+  }
+
+  /** Y of the top of the character's head in CSS px, or null before a model is loaded. */
+  headTop(): number | null {
+    const m = this.model;
+    if (!m) return null;
+    return m.y + this.crop.y0 * m.internalModel.height * m.scale.y;
   }
 
   /** True if the pixel under (x, y), in device pixels from the top-left, is part of the character. */

@@ -85,3 +85,64 @@ export async function resizeWindow(factor: number) {
   const height = Math.round((width * size.height) / size.width);
   await w.setSize(new LogicalSize(width, height));
 }
+
+// --- Claude chat (runs on the Rust side; see src-tauri/src/chat.rs).
+
+export interface ChatStatus {
+  has_key: boolean;
+  name: string;
+  model: string;
+}
+export interface ChatHandlers {
+  delta: (turn: number, text: string) => void;
+  done: (turn: number) => void;
+  error: (turn: number, kind: string, message: string) => void;
+}
+
+let browserTurn = 0;
+let browserHandlers: ChatHandlers | null = null;
+
+export async function chatStatus(): Promise<ChatStatus> {
+  if (!inTauri) return { has_key: true, name: "Aqua", model: "demo" };
+  return invoke<ChatStatus>("chat_status");
+}
+
+export async function setApiKey(key: string) {
+  if (inTauri) await invoke("set_api_key", { key });
+}
+
+export async function chatSend(text: string): Promise<number> {
+  if (inTauri) return invoke<number>("chat_send", { text });
+  // Browser demo: a canned streamed reply, so the UI can be tried without the app.
+  const turn = ++browserTurn;
+  const reply = `[happy] You said "${text}". [thinking] In the desktop app I'd ask Claude instead!`;
+  const chunks = reply.match(/.{1,6}/gs) ?? [];
+  void (async () => {
+    for (const c of chunks) {
+      await new Promise((r) => setTimeout(r, 40));
+      if (turn !== browserTurn) return browserHandlers?.error(turn, "cancelled", "Interrupted");
+      browserHandlers?.delta(turn, c);
+    }
+    browserHandlers?.done(turn);
+  })();
+  return turn;
+}
+
+export async function chatCancel() {
+  if (inTauri) await invoke("chat_cancel");
+  else browserTurn++;
+}
+
+export function onChat(handlers: ChatHandlers) {
+  browserHandlers = handlers;
+  if (!inTauri) return;
+  void listen<{ turn: number; text: string }>("chat-delta", (e) => handlers.delta(e.payload.turn, e.payload.text));
+  void listen<{ turn: number }>("chat-done", (e) => handlers.done(e.payload.turn));
+  void listen<{ turn: number; kind: string; message: string }>("chat-error", (e) =>
+    handlers.error(e.payload.turn, e.payload.kind, e.payload.message),
+  );
+}
+
+export function onEvent(name: "open-chat" | "open-api-key" | "chat-reset", cb: () => void) {
+  if (inTauri) void listen(name, () => cb());
+}

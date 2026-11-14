@@ -8,8 +8,8 @@ It runs in a small transparent, always-on-top window. Clicks pass through to wha
 
 | Milestone | State |
 |---|---|
-| 1. Transparent on-top window, Live2D model idling, drag, click-through | this PR |
-| 2. Typed chat with Claude (streaming), emotion tags drive motions | next |
+| 1. Transparent on-top window, Live2D model idling, drag, click-through | done |
+| 2. Typed chat with Claude (streaming), emotion tags drive motions | done |
 | 3. Local Kokoro TTS with lip sync | planned |
 | 4. Local whisper.cpp voice input | planned |
 
@@ -30,9 +30,31 @@ Every pull request also builds a Windows installer in CI; download it from the r
 - **First run** loads `Documents\live2d models\1014100aqua\1014100.model3.json` if it exists. Otherwise it asks you to pick a `.model3.json` file.
 - **Tray icon** (bottom right of the taskbar): *Choose model…*, *Reset position*, *Reload*, *Quit*.
 - **Drag** the character to move her. The position and size are remembered.
-- **Click** her to play a random reaction.
+- **Click** her (or press **Ctrl+Shift+Space** anywhere) to open the chat box. Type and press Enter; Esc closes it.
+- The first time you chat she asks for an [Anthropic API key](https://console.anthropic.com/settings/keys). It is stored in Windows Credential Manager, never in a file. `ANTHROPIC_API_KEY` in the environment also works. *Set API key…* in the tray changes it.
+- *Forget conversation* in the tray starts a fresh conversation.
 - **Ctrl + mouse wheel** over her makes the window bigger or smaller.
 - **Keys 1 to 7** (after clicking her) play happy, sad, angry, surprised, shy, thinking and proud, so you can check a model's motions.
+
+## Chat settings
+
+Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistant\` (created on first run). Edit it while the app is closed:
+
+```json
+{
+  "model_path": "C:\\Users\\you\\Documents\\live2d models\\1014100aqua\\1014100.model3.json",
+  "character_name": "Aqua",
+  "chat_model": "claude-opus-5-5",
+  "chat_effort": "low",
+  "persona": null
+}
+```
+
+- `chat_model`: any Claude model id. The default is Claude Opus 5.5. `claude-haiku-5-5` is much cheaper and faster if replies are good enough for you.
+- `chat_effort`: `low` (default, quick chatty replies), `medium`, `high`, `xhigh` or `max`.
+- `persona`: replaces the built-in personality prompt. Keep the line asking for one emotion tag per reply (`[happy] [sad] [angry] [surprised] [shy] [thinking] [proud] [neutral]`), since the tags are what make her move.
+
+Claude starts each reply with an emotion tag such as `[happy]`. The app strips the tags from the text and plays the matching motion. The API call is made from the Rust side, so the key never reaches the web page. Server-side refusal fallbacks are turned on, so if Claude Opus 5.5 declines a message the API retries it on a fallback model in the same call.
 
 ## Models
 

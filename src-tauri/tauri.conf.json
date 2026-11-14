@@ -14,8 +14,8 @@
       {
         "label": "main",
         "title": "Desktop Assistant",
-        "width": 360,
-        "height": 560,
+        "width": 380,
+        "height": 720,
         "transparent": true,
         "decorations": false,
         "alwaysOnTop": true,

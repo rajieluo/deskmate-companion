@@ -1,4 +1,5 @@
 import { Avatar } from "./avatar";
+import { ChatUI } from "./chat";
 import * as host from "./host";
 import { EMOTIONS } from "./motions";
 
@@ -8,6 +9,7 @@ const statusText = document.getElementById("status-text") as HTMLParagraphElemen
 const statusPick = document.getElementById("status-pick") as HTMLButtonElement;
 
 const avatar = new Avatar(canvas);
+const chat = new ChatUI(avatar);
 // Exposed for debugging from the devtools console and for tests.
 (window as unknown as { avatar: Avatar }).avatar = avatar;
 
@@ -82,10 +84,8 @@ canvas.addEventListener("mousemove", (e) => {
   }
 });
 canvas.addEventListener("mouseup", () => {
-  if (press) {
-    const pick = EMOTIONS[Math.floor(Math.random() * EMOTIONS.length)];
-    avatar.emote(pick);
-  }
+  // A click (no drag) opens or closes the chat box.
+  if (press) chat.toggle();
   press = null;
 });
 
@@ -102,6 +102,7 @@ window.addEventListener(
 
 // --- Number keys 1-7 play each emotion, for checking a model's motions.
 window.addEventListener("keydown", (e) => {
+  if (e.target instanceof HTMLInputElement) return;
   const i = Number(e.key) - 1;
   if (i >= 0 && i < EMOTIONS.length) avatar.emote(EMOTIONS[i]);
 });
