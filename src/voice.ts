@@ -32,6 +32,7 @@ export class KokoroEngine implements SpeechEngine {
     w.onmessage = (e) => {
       const m = e.data;
       if (m.type === "progress") this.onStatus(`Downloading voice… ${Math.round(m.progress)}%`);
+      else if (m.type === "garbled") log("warn", "[voice] the GPU produced garbled audio; switched to the CPU");
       else if (m.type === "ready") {
         log("info", `[voice] Kokoro running on ${m.device}`);
         this.onStatus("");
