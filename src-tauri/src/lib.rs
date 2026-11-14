@@ -172,8 +172,9 @@ fn stt_settings<R: Runtime>(app: &AppHandle<R>) -> Result<(String, String, std::
 /// Downloads the Whisper model ahead of time (no-op when it's already there).
 #[tauri::command]
 async fn stt_prepare<R: Runtime>(app: AppHandle<R>, stt: State<'_, Arc<Stt>>) -> Result<(), String> {
+    stt::check_cpu()?;
     let (name, _, dir) = stt_settings(&app)?;
-    stt.ensure_model(&app, &dir, &name).await.map(|_| ())
+    stt.ensure_model(&app, &dir, &name).await.map(|_| ()).inspect_err(|e| log::error!("speech model: {e}"))
 }
 
 /// Transcribes raw 16 kHz mono f32 samples sent as the request body.
@@ -186,13 +187,15 @@ async fn transcribe<R: Runtime>(
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("expected raw audio bytes".into());
     };
+    stt::check_cpu()?;
     let samples = stt::samples_from_bytes(bytes);
     let (name, language, dir) = stt_settings(&app)?;
-    let path = stt.ensure_model(&app, &dir, &name).await?;
+    let path = stt.ensure_model(&app, &dir, &name).await.inspect_err(|e| log::error!("speech model: {e}"))?;
     let stt = stt.inner().clone();
     tauri::async_runtime::spawn_blocking(move || stt.transcribe(&name, &path, &samples, &language))
         .await
         .map_err(|e| e.to_string())?
+        .inspect_err(|e| log::error!("transcribe: {e}"))
 }
 
 /// Brings the window forward and opens the chat box.
@@ -383,6 +386,14 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Log file: %LOCALAPPDATA%\com.rajieluo.desktopassistant\logs\Desktop Assistant.log on Windows.
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .max_file_size(2_000_000)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(
@@ -403,6 +414,12 @@ pub fn run() {
             thread::spawn(move || responder.respond(store.serve(request.uri().path())));
         })
         .setup(|app| {
+            let default_hook = std::panic::take_hook();
+            std::panic::set_hook(Box::new(move |info| {
+                log::error!("panic: {info}");
+                default_hook(info);
+            }));
+            log::info!("Desktop Assistant {} starting; {}", env!("CARGO_PKG_VERSION"), stt::cpu_summary());
             let config_dir = app.path().app_config_dir()?;
             let first_run = !config_dir.join("settings.json").exists();
             let documents = app.path().document_dir().ok();
@@ -417,7 +434,7 @@ pub fn run() {
             let listen = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyM);
             for shortcut in [talk, listen] {
                 if let Err(e) = app.global_shortcut().register(shortcut) {
-                    eprintln!("could not register {shortcut:?}: {e}");
+                    log::warn!("could not register {shortcut:?}: {e}");
                 }
             }
             app.manage(Arc::new(Stt::default()));

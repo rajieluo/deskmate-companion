@@ -80,6 +80,15 @@ Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistan
 
 Claude starts each reply with an emotion tag such as `[happy]`. The app strips the tags from the text and plays the matching motion. The API call is made from the Rust side, so the key never reaches the web page. Server-side refusal fallbacks are turned on, so if Claude Opus 5.5 declines a message the API retries it on a fallback model in the same call.
 
+## If something goes wrong
+
+The app writes a log to `%LOCALAPPDATA%\com.rajieluo.desktopassistant\logs\Desktop Assistant.log`.
+If it closes without a message, Windows also records the crash: open Event Viewer, go to
+Windows Logs > Application, and look for an "Application Error" for `desktop-assistant.exe`.
+The exception code there (for example `0xc000001d`, an illegal instruction) says what kind of crash it was.
+
+Speech input needs a CPU with AVX2 (most PCs from 2015 on).
+
 ## Models
 
 Models are loaded from your own folder and are **never committed** to this repo (`.gitignore` blocks Live2D model files). The app only reads files inside the folder of the model you picked.

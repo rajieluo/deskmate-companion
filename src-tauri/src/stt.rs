@@ -31,6 +31,35 @@ pub struct Stt {
     download: tokio::sync::Mutex<()>,
 }
 
+/// whisper.cpp is built for AVX2 (see .cargo/config.toml). Refuse politely on
+/// older CPUs instead of crashing with an illegal instruction.
+pub fn check_cpu() -> Result<(), String> {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    if !(is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") && is_x86_feature_detected!("f16c")) {
+        return Err("Speech input needs a CPU with AVX2 (most PCs from 2015 on); this one doesn't have it.".into());
+    }
+    Ok(())
+}
+
+/// For the log: which vector instructions this CPU has.
+pub fn cpu_summary() -> String {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        format!(
+            "cpu avx2={} fma={} f16c={} avx512f={} threads={}",
+            is_x86_feature_detected!("avx2"),
+            is_x86_feature_detected!("fma"),
+            is_x86_feature_detected!("f16c"),
+            is_x86_feature_detected!("avx512f"),
+            std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0)
+        )
+    }
+    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+    {
+        "cpu non-x86".into()
+    }
+}
+
 /// Only plain model names like "base.en" or "small"; they become part of a file name and URL.
 pub fn valid_model_name(name: &str) -> bool {
     !name.is_empty()
@@ -54,6 +83,7 @@ impl Stt {
         if path.is_file() {
             return Ok(path);
         }
+        log::info!("downloading Whisper model {name} to {}", path.display());
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         let part = path.with_extension("bin.part");
         let response = reqwest::get(format!("{MODEL_URL}{name}.bin"))
@@ -75,7 +105,12 @@ impl Stt {
             }
         }
         drop(file);
+        if total > 0.0 && done != total {
+            let _ = fs::remove_file(&part);
+            return Err(format!("Download of the Whisper model stopped early ({done} of {total} bytes)"));
+        }
         fs::rename(&part, &path).map_err(|e| e.to_string())?;
+        log::info!("Whisper model {name} downloaded ({done} bytes)");
         Ok(path)
     }
 
@@ -87,9 +122,11 @@ impl Stt {
             }
         }
         let path_str = path.to_str().ok_or("model path is not valid UTF-8")?;
+        log::info!("loading Whisper model {}", path.display());
         let ctx = WhisperContext::new_with_params(path_str, WhisperContextParameters::default())
             .map_err(|e| format!("Couldn't load the Whisper model: {e}"))?;
         let ctx = Arc::new(ctx);
+        log::info!("Whisper model loaded");
         *loaded = Some((name.to_string(), ctx.clone()));
         Ok(ctx)
     }
