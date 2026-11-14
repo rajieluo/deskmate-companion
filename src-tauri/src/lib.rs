@@ -95,8 +95,11 @@ fn history_clear(history: State<'_, Arc<History>>) -> Result<(), String> {
     history.clear()
 }
 
+// Async on purpose: creating a window from a synchronous command deadlocks on
+// Windows (sync commands run on the main thread, which the new webview needs),
+// which froze the whole app when the chat box's history button was pressed.
 #[tauri::command]
-fn history_open<R: Runtime>(app: AppHandle<R>) {
+async fn history_open<R: Runtime>(app: AppHandle<R>) {
     open_history(&app);
 }
 
