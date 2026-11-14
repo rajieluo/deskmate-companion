@@ -92,8 +92,10 @@ export async function resizeWindow(factor: number) {
   const w = getCurrentWindow();
   const scale = await w.scaleFactor();
   const size = (await w.innerSize()).toLogical(scale);
-  const width = Math.round(Math.min(1400, Math.max(160, size.width * factor)));
-  const height = Math.round((width * size.height) / size.width);
+  const width = Math.round(Math.min(1400, Math.max(200, size.width * factor)));
+  // Keep the default 380x720 shape rather than the current one, so a squashed
+  // window (it once got saved as 160x28, hiding her) can't stay squashed.
+  const height = Math.round((width * 720) / 380);
   await w.setSize(new LogicalSize(width, height));
 }
 

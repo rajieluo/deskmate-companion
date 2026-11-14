@@ -567,6 +567,16 @@ pub fn run() {
             if first_run {
                 reset_position(&window);
             }
+            // A restored size too small to show her (seen: 160x28) makes her vanish
+            // with no way back but deleting .window-state.json. Restore the default.
+            if let (Ok(size), Ok(scale)) = (window.inner_size(), window.scale_factor()) {
+                let size = size.to_logical::<f64>(scale);
+                if size.width < 150.0 || size.height < 250.0 {
+                    log::warn!("window size {}x{} is too small; resetting", size.width, size.height);
+                    let _ = window.set_size(tauri::LogicalSize::new(380.0, 720.0));
+                    reset_position(&window);
+                }
+            }
             spawn_cursor_poller(window);
             Ok(())
         })
