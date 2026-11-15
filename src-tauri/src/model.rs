@@ -164,6 +164,17 @@ impl ModelStore {
         find_persona(self.settings_file.parent()?, &self.current_dir()?)
     }
 
+    /// Writes the current model's persona to `current-persona.md` in the config folder
+    /// (deleting it when the model has none), so firstmate can match the loaded model.
+    /// Called when a model is loaded at startup and whenever it is switched. A failure
+    /// is logged and never stops the model from loading.
+    pub fn publish_persona(&self) {
+        let Some(dir) = self.settings_file.parent() else { return };
+        if let Err(e) = write_current_persona(dir, self.model_persona().as_deref()) {
+            log::warn!("couldn't update {}: {e}", dir.join(CURRENT_PERSONA).display());
+        }
+    }
+
     /// Name of the current model's folder.
     pub fn folder_name(&self) -> Option<String> {
         let s = self.settings();
@@ -231,6 +242,7 @@ impl ModelStore {
             inner.generation += 1;
         }
         self.save();
+        self.publish_persona();
         Ok(self.current().expect("model just set"))
     }
 
@@ -400,6 +412,25 @@ pub fn find_persona(config_dir: &Path, model_dir: &Path) -> Option<String> {
     })
 }
 
+/// The file in the config folder that holds the loaded model's persona, for firstmate.
+pub const CURRENT_PERSONA: &str = "current-persona.md";
+
+/// Replaces `current-persona.md` in `config_dir` with `persona`, or deletes it for None.
+fn write_current_persona(config_dir: &Path, persona: Option<&str>) -> std::io::Result<()> {
+    let file = config_dir.join(CURRENT_PERSONA);
+    match persona {
+        Some(text) => {
+            fs::create_dir_all(config_dir)?;
+            fs::write(file, format!("{text}
+"))
+        }
+        None => match fs::remove_file(file) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            other => other,
+        },
+    }
+}
+
 /// Drops a `---` front matter block at the top (settings such as `voice:`, read by
 /// `voices::folder_voice`), so only the character description reaches Claude.
 fn strip_front_matter(text: &str) -> &str {
@@ -434,7 +465,7 @@ pub fn name_from_folder(folder: &str) -> Option<String> {
 
 #[cfg(test)]
 mod persona_tests {
-    use super::find_persona;
+    use super::{find_persona, write_current_persona, CURRENT_PERSONA};
     use std::fs;
 
     #[test]
@@ -461,6 +492,24 @@ mod persona_tests {
         fs::write(config.join("personas").join("Nicole.md"), "   ").unwrap();
         assert_eq!(find_persona(&config, &model).as_deref(), Some("From the model folder."));
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn current_persona_file_follows_the_model() {
+        let config = std::env::temp_dir().join(format!("current-persona-test-{}", std::process::id()));
+        let file = config.join(CURRENT_PERSONA);
+        // Creates the folder if needed.
+        write_current_persona(&config, Some("Nicole runs a tiny agency.")).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "Nicole runs a tiny agency.
+");
+        write_current_persona(&config, Some("Aqua is a goddess.")).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "Aqua is a goddess.
+");
+        write_current_persona(&config, None).unwrap();
+        assert!(!file.exists());
+        // Already gone is fine.
+        write_current_persona(&config, None).unwrap();
+        fs::remove_dir_all(&config).unwrap();
     }
 }
 

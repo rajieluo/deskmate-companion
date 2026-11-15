@@ -853,6 +853,7 @@ pub fn run() {
             let store = Arc::new(ModelStore::load(config_dir, documents));
             // Saving now also marks later launches as "not first run".
             store.save();
+            store.publish_persona();
             app.manage(store);
             app.manage(Arc::new(Chat::default()));
             app.manage(Arc::new(ClaudeCode::default()));

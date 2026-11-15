@@ -139,6 +139,8 @@ voice: af_bella
 You are Nicole Demara, ...
 ``` Persona files for characters you don't own stay on your machine; don't commit them here.
 
+Whenever a model is loaded (at startup or when you switch models), the app also writes that model's persona text, front matter stripped, to `%APPDATA%\com.rajieluo.desktopassistant\current-persona.md`, so other tools such as firstmate can take on the same character. When the loaded model has no persona file, `current-persona.md` is deleted: no file means no persona. This copy is refreshed only on a model load or switch, so edits to a persona file reach it the next time that model is loaded. Don't edit `current-persona.md` itself; it is overwritten.
+
 Claude starts each reply with an emotion tag such as `[happy]`. The app strips the tags from the text and plays the matching motion. The API call is made from the Rust side, so the key never reaches the web page. Server-side refusal fallbacks are turned on, so if Claude Opus 5.5 declines a message the API retries it on a fallback model in the same call.
 
 ## If something goes wrong
