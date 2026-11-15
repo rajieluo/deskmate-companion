@@ -208,7 +208,7 @@ export class ChatUI {
       this.say(h.error, 10000);
       return;
     }
-    if (h.kind === "window") return; // she already said she's opening it
+    if (h.kind !== "session") return; // she already said what she is doing
     // Let her finish saying what she's starting before the new session talks over her.
     for (let waited = 0; this.voice.speaking && waited < 30000; waited += 250) {
       await new Promise((r) => setTimeout(r, 250));

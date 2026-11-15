@@ -349,7 +349,7 @@ export function onCrewTasks(cb: (tasks: CrewTask[]) => void) {
 /** Claude Code asked the app for a fresh session (kind "session") or a new terminal window ("window"). */
 export interface CodeHandoff {
   turn: number;
-  kind: "session" | "window";
+  kind: "session" | "window" | "switch";
   brief: string;
   folder: string;
   error: string | null;

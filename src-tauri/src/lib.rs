@@ -11,6 +11,7 @@
 
 mod chat;
 mod claude_code;
+mod sessions;
 mod crew;
 mod model;
 mod history;
@@ -318,6 +319,7 @@ async fn chat_send<R: Runtime>(
                 .clone()
                 .unwrap_or_else(|| claude_code::DEFAULT_PERMISSION_MODE.into()),
             prompt_file: app.path().app_config_dir().map_err(|e| e.to_string())?.join("avatar-prompt.txt"),
+            sessions_dir: app.path().app_config_dir().map_err(|e| e.to_string())?.join("sessions"),
             name,
             character,
         };
