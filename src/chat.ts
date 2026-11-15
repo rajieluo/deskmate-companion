@@ -100,6 +100,7 @@ export class ChatUI {
         4000,
       );
     });
+    host.onCodeHandoff((h) => void this.onHandoff(h));
     host.onCrewReply((body) => this.speakOut(body));
     host.onCrewAttention((a) => this.speakOut(a.speech));
     host.onCrewError((message) => this.say(message, 8000));
@@ -199,13 +200,34 @@ export class ChatUI {
     this.scheduleHide(Math.min(30000, 5000 + plain.split(/\s+/).length * 350));
   }
 
-  async send(text: string) {
+  /** Claude Code asked for a new session: the app has already dropped the old one. */
+  private async onHandoff(h: host.CodeHandoff) {
+    const where = h.folder.split(/[\\/]/).filter(Boolean).pop() ?? h.folder;
+    if (h.error) {
+      this.avatar.emote("sad");
+      this.say(h.error, 10000);
+      return;
+    }
+    if (h.kind === "window") return; // she already said she's opening it
+    // Let her finish saying what she's starting before the new session talks over her.
+    for (let waited = 0; this.voice.speaking && waited < 30000; waited += 250) {
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    if (h.turn !== this.turn) return; // the user already said something else
+    if (!h.brief) {
+      this.say(`(Fresh session in ${where}.)`, 4000);
+      return;
+    }
+    await this.send(h.brief, `(New session in ${where}) ${h.brief}`);
+  }
+
+  async send(text: string, historyText = text) {
     const status = await host.chatStatus();
     if (status.brain === "api" && !status.has_key) {
       this.askForKey();
       return;
     }
-    host.historyAppend("user", text);
+    host.historyAppend("user", historyText);
     this.tags = new TagStream();
     this.sentences = new SentenceBuffer();
     this.voice.stop();

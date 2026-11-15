@@ -346,6 +346,19 @@ export function onCrewTasks(cb: (tasks: CrewTask[]) => void) {
 }
 
 /** The first mate's answer to a message (published with fm-inbox.sh reply). */
+/** Claude Code asked the app for a fresh session (kind "session") or a new terminal window ("window"). */
+export interface CodeHandoff {
+  turn: number;
+  kind: "session" | "window";
+  brief: string;
+  folder: string;
+  error: string | null;
+}
+
+export function onCodeHandoff(cb: (h: CodeHandoff) => void) {
+  if (inTauri) void listen<CodeHandoff>("code-handoff", (e) => cb(e.payload));
+}
+
 export function onCrewReply(cb: (body: string) => void) {
   if (inTauri) void listen<{ id: string; body: string }>("crew-reply", (e) => cb(e.payload.body));
 }

@@ -630,6 +630,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let code_on = app.state::<Arc<ModelStore>>().settings().brain.as_deref() == Some("claude_code");
     let code = CheckMenuItem::with_id(app, "code", "Claude Code mode", true, code_on, None::<&str>)?;
     let code_folder = MenuItem::with_id(app, "code_folder", "Claude Code folder…", true, None::<&str>)?;
+    let code_window = MenuItem::with_id(app, "code_window", "New Claude Code window", true, None::<&str>)?;
     let crew_on = app.state::<Arc<ModelStore>>().settings().brain.as_deref() == Some("crew");
     let crew = CheckMenuItem::with_id(app, "crew", "Crew mode (firstmate)", true, crew_on, None::<&str>)?;
     let crew_open = MenuItem::with_id(app, "crew_open", "Open crew terminal", true, None::<&str>)?;
@@ -672,7 +673,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let menu =
-        Menu::with_items(app, &[&talk, &listen, &voice, &voice_menu, &history_item, &forget, &sep3, &model_menu, &code, &code_folder, &crew, &crew_open, &key, &sep, &choose, &follow, &fade, &reset, &reload, &sep2, &quit])?;
+        Menu::with_items(app, &[&talk, &listen, &voice, &voice_menu, &history_item, &forget, &sep3, &model_menu, &code, &code_folder, &code_window, &crew, &crew_open, &key, &sep, &choose, &follow, &fade, &reset, &reload, &sep2, &quit])?;
     // Kept so a right-click on the avatar can pop up the same menu; its
     // clicks go through the tray's on_menu_event handler below.
     app.manage(TrayMenu(menu.clone()));
@@ -694,6 +695,8 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             "listen" => start_listening(app),
             "forget" => {
                 app.state::<Arc<Chat>>().reset();
+                // Claude Code mode keeps its own session; forget that too.
+                app.state::<Arc<ClaudeCode>>().reset();
                 let _ = app.emit("chat-reset", ());
             }
             "voice" => {
@@ -734,6 +737,19 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             }
             "crew_open" => {
                 if let Err(e) = app.state::<Arc<Crew>>().open_terminal(app) {
+                    let _ = app.emit("crew-error", e);
+                }
+            }
+            "code_window" => {
+                // An interactive Claude Code window in the Claude Code folder (or the home folder).
+                let folder = app
+                    .state::<Arc<ModelStore>>()
+                    .settings()
+                    .claude_code_folder
+                    .filter(|f| f.is_dir())
+                    .or_else(|| std::env::var_os("USERPROFILE").map(std::path::PathBuf::from))
+                    .unwrap_or_else(|| ".".into());
+                if let Err(e) = claude_code::open_window(&folder, "") {
                     let _ = app.emit("crew-error", e);
                 }
             }
