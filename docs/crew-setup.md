@@ -140,8 +140,12 @@ outside tools:
 - `state/fleet-ledger.jsonl` lists task events (dispatched, status lines, PR ready,
   merged, cleaned up).
 
+- `state/avatar-say/*.txt` holds announcements the first mate wants said without being
+  asked (format in the README's Crew mode section). Each file is said once and then
+  deleted.
+
 It polls every 4 seconds while Crew mode is on. Replies and alerts from before the app
-started are not read out.
+started are not read out. Announcements are, because each one is written on purpose.
 
 ## Troubleshooting
 

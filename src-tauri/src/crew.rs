@@ -36,6 +36,7 @@ const POLL_EVERY: Duration = Duration::from_secs(4);
 /// Most ledger bytes read per poll; a long backlog is read over several polls.
 const LEDGER_CHUNK: u64 = 4 * 1024 * 1024;
 const LEDGER_MARK: &str = "@@LEDGER@@";
+const SAY_MARK: &str = "@@SAY@@ ";
 
 /// The helper that runs inside WSL. Usage: crew.sh <firstmate home> <command> [args...]
 pub const HELPER: &str = r#"#!/usr/bin/env bash
@@ -111,6 +112,19 @@ case $cmd in
     fi
     [ -n "$out" ] || out='{}'
     printf '%s\n' "$out"
+    # Announcements the first mate wants said: one file per line, oldest first. Only
+    # *.txt, so a file still being written under a temporary name waits. Each one goes
+    # out as hex (so any text survives) and is then removed; empty or unreadable files
+    # are removed without a line.
+    LC_COLLATE=C
+    for f in state/avatar-say/*.txt; do
+      [ -f "$f" ] || continue
+      hex=$(head -c 8192 "$f" 2>/dev/null | od -An -v -tx1 | tr -d ' \n')
+      if [ -n "$hex" ]; then
+        echo "@@SAY@@ $(basename "$f") $hex"
+      fi
+      rm -f "$f"
+    done
     f=state/fleet-ledger.jsonl
     if [ -f "$f" ]; then size=$(wc -c <"$f"); else size=0; fi
     echo "@@LEDGER@@ $size"
@@ -592,6 +606,27 @@ pub struct Reply {
     pub body: String,
 }
 
+fn from_hex(hex: &str) -> Option<Vec<u8>> {
+    if hex.len() % 2 != 0 {
+        return None;
+    }
+    (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok()).collect()
+}
+
+/// Announcements in poll output (`@@SAY@@ <file> <hex>` lines before the ledger marker),
+/// oldest first. Spoken like replies; the id is `say:<file>`.
+pub fn announcements(stdout: &str) -> Vec<Reply> {
+    let head = stdout.find(LEDGER_MARK).map_or(stdout, |at| &stdout[..at]);
+    head.lines()
+        .filter_map(|l| {
+            let mut parts = l.strip_prefix(SAY_MARK)?.split_whitespace();
+            let (name, hex) = (parts.next()?, parts.next()?);
+            let body = String::from_utf8_lossy(&from_hex(hex)?).trim().to_string();
+            (!body.is_empty()).then(|| Reply { id: format!("say:{name}"), body })
+        })
+        .collect()
+}
+
 /// Replies in a receipts document, oldest first, and the cursor after them.
 pub fn replies(receipts: &Value) -> (Vec<Reply>, Option<String>) {
     let list = receipts["replies"].as_array().cloned().unwrap_or_default();
@@ -755,7 +790,9 @@ impl Crew {
                 }
             }
         }
-        for reply in new_replies {
+        // Announcements are always said, even ones written while the app was closed: the
+        // helper removes each file as it hands it over, so each one comes once.
+        for reply in new_replies.into_iter().chain(announcements(&out.stdout)) {
             let _ = app.emit("crew-reply", reply);
         }
         for a in said {
@@ -880,6 +917,67 @@ mod tests {
         assert_eq!(list, vec![Reply { id: "n1".into(), body: "[happy] On it.".into() }]);
         assert_eq!(cursor.as_deref(), Some("000000000001"));
         assert!(split_poll("no marker").is_none());
+    }
+
+    #[test]
+    fn reads_announcements_from_poll_output() {
+        let hex = |s: &str| s.bytes().map(|b| format!("{b:02x}")).collect::<String>();
+        let out = format!(
+            "{{\"replies\":[]}}\n@@SAY@@ 1790000000-a.txt {}\n@@SAY@@ 1790000001-b.txt {}\n@@SAY@@ 1790000002-c.txt {}\n@@SAY@@ bad.txt 4g\n@@LEDGER@@ 3\n@@SAY@@ x.txt {}\n",
+            hex("[happy] fix login is done. Its pull request is ready.\n"),
+            hex("  \n"),
+            hex("[proud] Café ✓"),
+            hex("[sad] not an announcement"),
+        );
+        assert_eq!(
+            announcements(&out),
+            vec![
+                Reply { id: "say:1790000000-a.txt".into(), body: "[happy] fix login is done. Its pull request is ready.".into() },
+                Reply { id: "say:1790000002-c.txt".into(), body: "[proud] Café ✓".into() },
+            ]
+        );
+        // The receipts line is still found with announcement lines after it.
+        let (receipts, size, _) = split_poll(&out).unwrap();
+        assert!(receipts["replies"].is_array());
+        assert_eq!(size, 3);
+        assert!(announcements("{}\n@@LEDGER@@ 0\n").is_empty());
+    }
+
+    #[test]
+    fn helper_announcements_round_trip() {
+        if cfg!(windows) || std::process::Command::new("bash").arg("-c").arg("true").status().is_err() {
+            return;
+        }
+        let home = std::env::temp_dir().join(format!("crew-say-{}", request_id()));
+        std::fs::create_dir_all(home.join("bin")).unwrap();
+        std::fs::create_dir_all(home.join("state/avatar-say")).unwrap();
+        std::fs::write(home.join("AGENTS.md"), "").unwrap();
+        let inbox = home.join("bin/fm-inbox.sh");
+        std::fs::write(&inbox, "#!/bin/sh\necho '{}'\n").unwrap();
+        std::process::Command::new("chmod").arg("+x").arg(&inbox).status().unwrap();
+        let say = home.join("state/avatar-say");
+        std::fs::write(say.join("2-b.txt"), "[happy] Second.").unwrap();
+        std::fs::write(say.join("1-a.txt"), "[happy] First.").unwrap();
+        std::fs::write(say.join("0-empty.txt"), "").unwrap();
+        std::fs::write(say.join("3-c.tmp"), "[happy] Not yet.").unwrap();
+        let helper = home.join("crew.sh");
+        std::fs::write(&helper, HELPER).unwrap();
+        let run = || {
+            let out = std::process::Command::new("bash")
+                .arg(&helper)
+                .arg(&home)
+                .args(["poll", "", "0", "100"])
+                .output()
+                .unwrap();
+            String::from_utf8(out.stdout).unwrap()
+        };
+        let bodies: Vec<String> = announcements(&run()).into_iter().map(|r| r.body).collect();
+        assert_eq!(bodies, vec!["[happy] First.", "[happy] Second."]);
+        assert!(announcements(&run()).is_empty(), "each announcement is said once");
+        assert!(say.join("3-c.tmp").exists() && !say.join("0-empty.txt").exists());
+        std::fs::remove_dir_all(&say).unwrap();
+        assert!(split_poll(&run()).is_some(), "an absent folder is fine");
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

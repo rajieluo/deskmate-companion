@@ -82,6 +82,16 @@ Permissions: there is no one to click "Allow" in this mode, so it runs with `acc
 
 Crew mode makes her the face of [firstmate](https://github.com/kunchenguid/firstmate), which runs several Claude Code sessions in parallel, each in its own git worktree. You talk to her; she passes it to firstmate's first mate, reads out its answers, and shows a badge for each task (blue working, amber needs you, green PR ready, red failed). Firstmate runs in WSL2. Setup and details: [docs/crew-setup.md](docs/crew-setup.md).
 
+### Announcements from the first mate
+
+The first mate can also start talking on its own, for example to say a job finished and its pull request is ready. It writes one file per announcement into `state/avatar-say/` under its home (create the folder if it's missing):
+
+- One plain-text `.txt` file per announcement, holding one spoken line in the same shape as a reply: it starts with one emotion tag (such as `[happy]`), then one to three short sentences, no Markdown. Example: `[happy] fix login is done. Its pull request is ready for you.`
+- Name files so lexical order is creation order, e.g. `<epoch-seconds>-<random>.txt`. They are said oldest first.
+- Write under a temporary name that doesn't end in `.txt` and then rename it, so a half-written file is never read: `printf '%s\n' "$line" > state/avatar-say/$name.tmp && mv state/avatar-say/$name.tmp state/avatar-say/$name.txt`.
+
+She checks the folder at every poll (every 4 seconds) and speaks each announcement once, just like a reply. Each file is deleted as soon as it's picked up. Announcements written while the app was closed are said the next time Crew mode starts. Empty or unreadable files are deleted without being said, and anything past the first 8 KB of a file is cut off.
+
 ## Chat settings
 
 Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistant\` (created on first run). Edit it while the app is closed:
