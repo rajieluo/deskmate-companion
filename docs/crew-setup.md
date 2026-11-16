@@ -15,6 +15,24 @@ There are two ways to run firstmate on Windows:
   Ubuntu, the platform it's built for. Set `"crew_shell": "wsl"` in settings.json and
   follow steps 1 to 4 below.
 
+## She is the first mate
+
+By default the app runs firstmate's first mate itself: one long-running headless Claude
+Code session in the firstmate folder (`claude -p --input-format stream-json`), with her
+character added on top of firstmate's own instructions. Your messages go straight in and
+her answers stream back, like Claude Code mode. When firstmate wakes her for crew news
+(a decision, a failure, a PR), she says it out loud; wakes that need nothing from you stay
+quiet.
+
+- The session starts when Crew mode is turned on (or at launch), because firstmate's
+  startup takes a minute or so. It's resumed across app restarts (`crew_session` in
+  settings.json).
+- Don't also run `claude` in the firstmate folder yourself: only one first mate can hold
+  firstmate's lock. **Open crew terminal** only opens Herdr to watch the crew; it no
+  longer starts a first mate there.
+- Set `"crew_direct": false` to go back to passing messages to a first mate you run in
+  Herdr yourself (the older setup described below).
+
 ## Native Windows (Git Bash)
 
 1. Install the tools listed in firstmate-for-windows'
@@ -124,6 +142,9 @@ In `%APPDATA%\com.rajieluo.desktopassistant\settings.json`:
 | ------------- | -------------------- | ----------------------------------------------- |
 | `crew_shell`  | `git-bash` when Git for Windows is installed, else `wsl` | How the app reaches firstmate |
 | `crew_home`   | `~/firstmate`        | The firstmate folder (in Git Bash or WSL terms) |
+| `crew_direct` | `true` | She is the first mate (see above); `false` passes notes to one you run |
+| `crew_permission_mode` | `auto` | Claude Code permission mode for the first mate |
+| `crew_session` | set by the app | The first mate's session, resumed across restarts |
 | `crew_distro` | an Ubuntu distro if there is one | Which WSL distribution to use, e.g. `"Ubuntu"`. Docker Desktop's distros are always skipped. |
 
 ## How it works

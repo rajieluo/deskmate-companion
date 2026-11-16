@@ -140,7 +140,7 @@ case $cmd in
       # Windows: Herdr is the crew's terminal. When no Herdr was running yet, type
       # `claude` into its first pane once it's up, which starts the first mate.
       # (With Herdr already running, its panes may be crewmates, so leave them alone.)
-      if ! herdr pane list >/dev/null 2>&1 && ! bin/fm-inbox.sh ready 2>/dev/null | grep -q '"can_receive":true'; then
+      if [ "$1" != watch ] && ! herdr pane list >/dev/null 2>&1 && ! bin/fm-inbox.sh ready 2>/dev/null | grep -q '"can_receive":true'; then
         winhome=$(cygpath -w "$PWD" 2>/dev/null || pwd)
         (
           for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
@@ -157,9 +157,20 @@ case $cmd in
       exec herdr
     fi
     if command -v tmux >/dev/null 2>&1; then
+      [ "$1" = watch ] && exec tmux new-session -A -s firstmate
       exec tmux new-session -A -s firstmate claude
     fi
+    [ "$1" = watch ] && exec bash --login
     exec claude
+    ;;
+  mate)
+    # The app is the first mate: one long-running headless Claude Code session that
+    # reads the captain's messages as stream-json on stdin.
+    # Usage: mate <prompt file> <permission mode> [<session to resume>]
+    set -- -p --input-format stream-json --output-format stream-json --verbose \
+      --include-partial-messages --permission-mode "$2" --append-system-prompt-file "$1" \
+      ${3:+--resume "$3"}
+    exec claude "$@"
     ;;
   *)
     echo "unknown command $cmd" >&2
@@ -271,7 +282,7 @@ pub fn find_git_bash() -> Option<PathBuf> {
 }
 
 /// C:\Users\x\crew.sh -> C:/Users/x/crew.sh, which Git Bash accepts.
-fn to_git_bash_path(path: &Path) -> String {
+pub(crate) fn to_git_bash_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
@@ -335,7 +346,7 @@ pub fn to_wsl_path(path: &Path) -> String {
     }
 }
 
-fn helper_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+pub(crate) fn helper_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join("crew.sh");
@@ -362,7 +373,7 @@ fn helper_argv(helper: &Path, config: &CrewConfig) -> (PathBuf, Vec<String>) {
     }
 }
 
-fn helper_command(helper: &Path, config: &CrewConfig, args: &[&str]) -> tokio::process::Command {
+pub(crate) fn helper_command(helper: &Path, config: &CrewConfig, args: &[&str]) -> tokio::process::Command {
     let (program, pre) = helper_argv(helper, config);
     let mut cmd = tokio::process::Command::new(program);
     cmd.args(pre).arg(&config.home).args(args);
@@ -707,7 +718,7 @@ impl Crew {
     }
 
     /// First use: check the home exists and turn on the fleet ledger.
-    async fn ensure_checked<R: Runtime>(&self, app: &AppHandle<R>, config: &CrewConfig) -> Result<(), String> {
+    pub(crate) async fn ensure_checked<R: Runtime>(&self, app: &AppHandle<R>, config: &CrewConfig) -> Result<(), String> {
         if self.checked.load(Ordering::SeqCst) {
             return Ok(());
         }
@@ -843,6 +854,10 @@ impl Crew {
         let (program, pre) = helper_argv(&helper, &config);
         let mut cmd = std::process::Command::new(program);
         cmd.args(pre).arg(&config.home).arg("open");
+        // When she is the first mate, the terminal is only for watching the crew.
+        if crate::firstmate::direct(&app.state::<std::sync::Arc<ModelStore>>()) {
+            cmd.arg("watch");
+        }
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;

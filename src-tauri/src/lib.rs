@@ -13,6 +13,7 @@ mod chat;
 mod claude_code;
 mod sessions;
 mod crew;
+mod firstmate;
 mod model;
 mod history;
 mod stt;
@@ -24,6 +25,7 @@ use std::{sync::Arc, thread, time::Duration};
 use chat::{Chat, ChatConfig};
 use claude_code::ClaudeCode;
 use crew::Crew;
+use firstmate::FirstMate;
 use model::{ModelInfo, ModelStore};
 use history::History;
 use stt::Stt;
@@ -290,6 +292,18 @@ async fn chat_send<R: Runtime>(
     let s = store.settings();
     let name = store.character_name();
     let character = store.model_persona();
+    if s.brain.as_deref() == Some("crew") && firstmate::direct(&store) {
+        // She is the first mate: the message goes straight into its session.
+        let turn = code.begin();
+        app.state::<Arc<Crew>>().start_polling(app.clone());
+        let mate = app.state::<Arc<FirstMate>>().inner().clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(message) = mate.send(&app, turn, &text).await {
+                let _ = app.emit("chat-error", chat::ChatError { turn, message, kind: "crew".into() });
+            }
+        });
+        return Ok(turn);
+    }
     if s.brain.as_deref() == Some("crew") {
         // The note is queued at once; the first mate's answer arrives later as crew-reply.
         let turn = code.begin();
@@ -389,6 +403,11 @@ fn set_brain<R: Runtime>(app: &AppHandle<R>, brain: &str) {
     sync_brain_menu(app, brain);
     if brain == "crew" {
         app.state::<Arc<Crew>>().start_polling(app.clone());
+        if firstmate::direct(&app.state::<Arc<ModelStore>>()) {
+            app.state::<Arc<FirstMate>>().warm(app.clone());
+        }
+    } else {
+        app.state::<Arc<FirstMate>>().stop();
     }
     let _ = app.emit("brain-changed", brain);
 }
@@ -877,6 +896,8 @@ pub fn run() {
             app.manage(Arc::new(ClaudeCode::default()));
             let crew = Arc::new(Crew::default());
             app.manage(crew.clone());
+            let mate = Arc::new(FirstMate::default());
+            app.manage(mate.clone());
 
             let hotkeys = register_hotkeys(app.handle());
             app.manage(hotkeys);
@@ -938,6 +959,9 @@ pub fn run() {
             spawn_cursor_poller(window);
             if app.state::<Arc<ModelStore>>().settings().brain.as_deref() == Some("crew") {
                 crew.start_polling(app.handle().clone());
+                if firstmate::direct(&app.state::<Arc<ModelStore>>()) {
+                    mate.warm(app.handle().clone());
+                }
             }
             Ok(())
         })
