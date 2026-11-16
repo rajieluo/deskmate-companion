@@ -30,6 +30,8 @@ quiet.
 - Don't also run `claude` in the firstmate folder yourself: only one first mate can hold
   firstmate's lock. **Open crew terminal** only opens Herdr to watch the crew; it no
   longer starts a first mate there.
+- Switching to another mode keeps the first mate running, so crew news is still read
+  out and coming back is instant. It ends when the app quits.
 - Set `"crew_direct": false` to go back to passing messages to a first mate you run in
   Herdr yourself (the older setup described below).
 

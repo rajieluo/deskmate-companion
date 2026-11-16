@@ -186,14 +186,6 @@ impl FirstMate {
         });
     }
 
-    /// Ends the session: closing stdin lets Claude Code finish and exit by itself.
-    pub fn stop(self: &Arc<Self>) {
-        let me = self.clone();
-        tauri::async_runtime::spawn(async move {
-            me.live.lock().await.take();
-        });
-    }
-
     async fn spawn<R: Runtime>(self: &Arc<Self>, app: &AppHandle<R>) -> Result<Live, String> {
         let store = app.state::<Arc<ModelStore>>().inner().clone();
         let config = CrewConfig::from_settings(&store);

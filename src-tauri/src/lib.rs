@@ -406,9 +406,9 @@ fn set_brain<R: Runtime>(app: &AppHandle<R>, brain: &str) {
         if firstmate::direct(&app.state::<Arc<ModelStore>>()) {
             app.state::<Arc<FirstMate>>().warm(app.clone());
         }
-    } else {
-        app.state::<Arc<FirstMate>>().stop();
     }
+    // Leaving Crew mode keeps the first mate running, so coming back is instant and
+    // crew news is still read out.
     let _ = app.emit("brain-changed", brain);
 }
 
