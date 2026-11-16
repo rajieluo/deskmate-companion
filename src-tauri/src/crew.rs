@@ -167,6 +167,9 @@ case $cmd in
     # The app is the first mate: one long-running headless Claude Code session that
     # reads the captain's messages as stream-json on stdin.
     # Usage: mate <prompt file> <permission mode> [<session to resume>]
+    # Give session start room to finish inside Claude Code's 180 s hook limit, so the
+    # first mate doesn't have to run it again (Windows is slow at it).
+    export FM_SESSION_START_TIMEOUT=${FM_SESSION_START_TIMEOUT:-170}
     set -- -p --input-format stream-json --output-format stream-json --verbose \
       --include-partial-messages --permission-mode "$2" --append-system-prompt-file "$1" \
       ${3:+--resume "$3"}

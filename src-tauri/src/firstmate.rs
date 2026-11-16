@@ -26,6 +26,11 @@ use crate::model::ModelStore;
 
 pub const DEFAULT_PERMISSION_MODE: &str = "auto";
 
+/// The app's first message to a new session: it only makes firstmate's session start run.
+pub const WARM_UP: &str = "The desktop app just started this session. Do your session start as AGENTS.md says, \
+handle anything it reports that needs handling, then reply with only the tag [neutral] unless the captain \
+needs to hear something.";
+
 /// True when Crew mode runs the first mate in the app (the default).
 pub fn direct(store: &ModelStore) -> bool {
     store.settings().crew_direct.unwrap_or(true)
@@ -115,12 +120,15 @@ pub fn edge(line: &str) -> Edge {
 /// Who the text being streamed belongs to.
 #[derive(Default)]
 struct Turns {
-    /// The captain's messages not yet answered, oldest first.
-    pending: VecDeque<u64>,
+    /// Messages not yet answered, oldest first: the captain's turn, or None for the
+    /// app's own start-up message.
+    pending: VecDeque<Option<u64>>,
     /// The reply being streamed is for this message (None: a turn she started herself).
     current: Option<u64>,
     /// A reply is being streamed.
     open: bool,
+    /// The reply answers the front of `pending` (else she started the turn herself).
+    answering: bool,
     /// Text of a turn she started herself, read out when it ends.
     own: String,
 }
@@ -146,10 +154,17 @@ impl FirstMate {
             let _ = app.emit("chat-activity", Activity { turn, text: "Getting the crew's records out…".into() });
             *live = Some(self.spawn(app).await?);
         }
-        self.turns.lock().unwrap().pending.push_back(turn);
+        {
+            let mut t = self.turns.lock().unwrap();
+            if t.pending.front() == Some(&None) {
+                let text = "Still getting the crew's records out. The first start takes a few minutes…".into();
+                let _ = app.emit("chat-activity", Activity { turn, text });
+            }
+            t.pending.push_back(Some(turn));
+        }
         let l = live.as_mut().expect("started");
         if let Err(e) = l.stdin.write_all(user_line(text).as_bytes()).await {
-            self.turns.lock().unwrap().pending.retain(|t| *t != turn);
+            self.turns.lock().unwrap().pending.retain(|t| *t != Some(turn));
             *live = None;
             return Err(format!("I lost the first mate ({e}). Try again and I'll start it again."));
         }
@@ -204,7 +219,16 @@ impl FirstMate {
         let mut cmd = crew::helper_command(&helper, &config, &args);
         cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
         let mut child = cmd.spawn().map_err(|e| format!("Couldn't start the first mate: {e}"))?;
-        let stdin = child.stdin.take().expect("piped stdin");
+        let mut stdin = child.stdin.take().expect("piped stdin");
+        // Claude Code runs firstmate's session start only when the first message
+        // arrives, and it can take minutes. Send one of the app's own now, so the
+        // captain's first message doesn't wait for it.
+        self.turns.lock().unwrap().pending.push_back(None);
+        stdin
+            .write_all(user_line(WARM_UP).as_bytes())
+            .await
+            .map_err(|e| format!("Couldn't reach the first mate: {e}"))?;
+        let _ = stdin.flush().await;
         let stdout = child.stdout.take().expect("piped stdout");
         let mut stderr = child.stderr.take().expect("piped stderr");
         let generation = {
@@ -243,7 +267,7 @@ impl FirstMate {
                 t.current = None;
                 t.open = false;
                 t.own.clear();
-                t.pending.drain(..).collect()
+                t.pending.drain(..).flatten().collect()
             };
             let last = err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim().to_string();
             for turn in failed {
@@ -268,7 +292,8 @@ impl FirstMate {
         for out in outs {
             if !t.open {
                 t.open = true;
-                t.current = t.pending.front().copied();
+                t.current = t.pending.front().copied().flatten();
+                t.answering = !t.pending.is_empty();
             }
             match (out, t.current) {
                 (Out::Text(text), Some(turn)) => {
@@ -287,19 +312,30 @@ impl FirstMate {
             Edge::Result(error) => Some(error),
         };
         if !t.open {
-            // A result with no reply streamed: an error for the oldest message, or nothing.
-            if let Some(Some(message)) = end {
-                if let Some(turn) = t.pending.pop_front() {
-                    let _ = app.emit("chat-error", ChatError { turn, message, kind: "crew".into() });
+            // Nothing was streamed. A reply that ended empty answers the oldest message;
+            // so does a failed result. A plain result just follows a reply already ended.
+            match end {
+                None => {
+                    if let Some(Some(turn)) = t.pending.pop_front() {
+                        let _ = app.emit("chat-done", Done { turn, model: None, stop_reason: None });
+                    }
                 }
+                Some(Some(message)) => {
+                    if let Some(Some(turn)) = t.pending.pop_front() {
+                        let _ = app.emit("chat-error", ChatError { turn, message, kind: "crew".into() });
+                    }
+                }
+                Some(None) => {}
             }
             return;
         }
         t.open = false;
         parser.next_turn();
+        if t.answering {
+            t.pending.pop_front();
+        }
         match t.current.take() {
             Some(turn) => {
-                t.pending.retain(|p| *p != turn);
                 match end {
                     Some(Some(message)) => {
                         let _ = app.emit("chat-error", ChatError { turn, message, kind: "crew".into() });
