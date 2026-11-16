@@ -121,6 +121,8 @@ export interface ChatStatus {
   voice_device: string;
   brain: "api" | "claude_code" | "crew";
   claude_code_folder: string | null;
+  /** Where the chat box sits: "above", "middle", "below" or a dragged fraction like "0.620". */
+  toolbar_position: string;
 }
 export interface ChatHandlers {
   delta: (turn: number, text: string) => void;
@@ -178,6 +180,15 @@ export function setVoiceEnabled(on: boolean) {
 const browserVoiceListeners: ((on: boolean) => void)[] = [];
 
 /** Saves the voice speed (0.5 to 2) and pitch (0.75 to 1.35) to settings. */
+/** Saves where the chat box sits (a preset or a dragged fraction of the window height). */
+export function setToolbarPosition(pos: string) {
+  if (inTauri) void invoke("set_toolbar_position", { pos }).catch((e) => console.warn("[toolbar]", e));
+}
+
+export function onToolbarPositionChanged(cb: (pos: string) => void) {
+  if (inTauri) void listen<string>("toolbar-position-changed", (e) => cb(e.payload));
+}
+
 export function setVoiceTuning(speed: number, pitch: number) {
   if (inTauri) void invoke("set_voice_tuning", { speed, pitch }).catch((e) => console.warn("[voice]", e));
 }
@@ -197,7 +208,7 @@ export function log(level: "info" | "warn" | "error", message: string) {
 
 export async function chatStatus(): Promise<ChatStatus> {
   if (!inTauri) {
-    return { hotkeys: { talk: "Ctrl+Shift+Space", listen: "Ctrl+Alt+M", mute: "Ctrl+Alt+U" }, has_key: true, name: "Aqua", model: "demo", voice_enabled: true, follow_mouse: true, fade_bottom: true, voice: "af_heart", voice_speed: 1, voice_pitch: 1, voice_device: "cpu", brain: "api", claude_code_folder: null };
+    return { hotkeys: { talk: "Ctrl+Shift+Space", listen: "Ctrl+Alt+M", mute: "Ctrl+Alt+U" }, has_key: true, name: "Aqua", model: "demo", voice_enabled: true, follow_mouse: true, fade_bottom: true, voice: "af_heart", voice_speed: 1, voice_pitch: 1, voice_device: "cpu", brain: "api", claude_code_folder: null, toolbar_position: new URLSearchParams(location.search).get("bar") ?? "middle" };
   }
   return invoke<ChatStatus>("chat_status");
 }

@@ -65,6 +65,10 @@ pub struct Settings {
     pub hotkeys: Option<std::collections::HashMap<String, String>>,
     /// Fade out the bottom edge of the figure. Default: true.
     pub fade_bottom: Option<bool>,
+    /// Where the chat box sits over the character: "above" (her head), "middle"
+    /// (default), "below" (her feet), or a dragged spot as a fraction of the window
+    /// height, e.g. "0.620".
+    pub toolbar_position: Option<String>,
     /// Head and eyes follow the mouse cursor. Default: true.
     pub follow_mouse: Option<bool>,
     /// Voice picked in the tray for a model, keyed by folder name, e.g. {"Nicole": "af_nicole"}.

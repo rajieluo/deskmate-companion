@@ -112,6 +112,40 @@ const MODEL_CHOICES: &[(&str, &str, &str)] = &[
 
 /// The Model submenu's items, kept so the check mark can move when one is picked.
 struct ModelMenu<R: Runtime>(Vec<CheckMenuItem<R>>);
+/// The tray's "Chat box position" choices: (menu id, saved value, label).
+const TOOLBAR_CHOICES: &[(&str, &str, &str)] = &[
+    ("bar:above", "above", "Above her head"),
+    ("bar:middle", "middle", "Over her middle"),
+    ("bar:below", "below", "At her feet"),
+];
+/// The "Chat box position" submenu's items, so the check can follow a pick or a drag.
+struct ToolbarMenu<R: Runtime>(Vec<CheckMenuItem<R>>);
+
+/// Saves where the chat box sits, ticks the tray (nothing ticked for a dragged
+/// spot) and, if `tell_page`, moves it on the page.
+fn set_toolbar<R: Runtime>(app: &AppHandle<R>, pos: &str, tell_page: bool) {
+    let valid = TOOLBAR_CHOICES.iter().any(|(_, v, _)| *v == pos)
+        || pos.parse::<f64>().is_ok_and(|f| (0.0..=1.0).contains(&f));
+    if !valid {
+        return;
+    }
+    app.state::<Arc<ModelStore>>().update(|s| s.toolbar_position = Some(pos.to_string()));
+    if let Some(menu) = app.try_state::<ToolbarMenu<R>>() {
+        for (item, (_, value, _)) in menu.0.iter().zip(TOOLBAR_CHOICES) {
+            let _ = item.set_checked(*value == pos);
+        }
+    }
+    if tell_page {
+        let _ = app.emit("toolbar-position-changed", pos);
+    }
+}
+
+/// The page dragged the chat box to a new spot (or double-clicked it back to the middle).
+#[tauri::command]
+fn set_toolbar_position<R: Runtime>(app: AppHandle<R>, pos: String) {
+    set_toolbar(&app, &pos, false);
+}
+
 /// The tray's "Speak replies" item, so mute from the page or hotkey can update it.
 struct VoiceItem<R: Runtime>(CheckMenuItem<R>);
 /// The tray's "Voice" submenu: "the model's own voice" item, then (id, item) per voice.
@@ -166,6 +200,7 @@ struct ChatStatus {
     /// "api", "claude_code" or "crew"
     brain: String,
     claude_code_folder: Option<String>,
+    toolbar_position: String,
 }
 
 /// Saves one chat message to the history file.
@@ -273,6 +308,7 @@ fn chat_status(store: State<'_, Arc<ModelStore>>, hotkeys: State<'_, Hotkeys>) -
         voice_device: s.voice_device.unwrap_or_else(|| "cpu".into()),
         brain: s.brain.unwrap_or_else(|| "api".into()),
         claude_code_folder: s.claude_code_folder.map(|p| p.display().to_string()),
+        toolbar_position: s.toolbar_position.unwrap_or_else(|| "middle".into()),
     }
 }
 
@@ -648,6 +684,19 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let follow = CheckMenuItem::with_id(app, "follow", "Follow the mouse", true, follow_on, None::<&str>)?;
     let fade_on = app.state::<Arc<ModelStore>>().settings().fade_bottom.unwrap_or(true);
     let fade = CheckMenuItem::with_id(app, "fade", "Fade bottom edge", true, fade_on, None::<&str>)?;
+    let bar_now = app.state::<Arc<ModelStore>>().settings().toolbar_position.unwrap_or_else(|| "middle".into());
+    let mut bar_items = Vec::new();
+    for (id, value, label) in TOOLBAR_CHOICES {
+        bar_items.push(CheckMenuItem::with_id(app, *id, *label, true, bar_now == *value, None::<&str>)?);
+    }
+    let bar_sep = PredefinedMenuItem::separator(app)?;
+    let bar_hint = MenuItem::with_id(app, "bar:hint", "Or drag the handle at its left end", false, None::<&str>)?;
+    let mut bar_refs: Vec<&dyn tauri::menu::IsMenuItem<R>> =
+        bar_items.iter().map(|i| i as &dyn tauri::menu::IsMenuItem<R>).collect();
+    bar_refs.push(&bar_sep);
+    bar_refs.push(&bar_hint);
+    let bar_menu = Submenu::with_items(app, "Chat box position", true, &bar_refs)?;
+    app.manage(ToolbarMenu(bar_items.clone()));
     let code_on = app.state::<Arc<ModelStore>>().settings().brain.as_deref() == Some("claude_code");
     let code = CheckMenuItem::with_id(app, "code", "Claude Code mode", true, code_on, None::<&str>)?;
     let code_folder = MenuItem::with_id(app, "code_folder", "Claude Code folder…", true, None::<&str>)?;
@@ -694,7 +743,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let menu =
-        Menu::with_items(app, &[&talk, &listen, &voice, &voice_menu, &history_item, &forget, &sep3, &model_menu, &code, &code_folder, &code_window, &crew, &crew_open, &key, &sep, &choose, &follow, &fade, &reset, &reload, &sep2, &quit])?;
+        Menu::with_items(app, &[&talk, &listen, &voice, &voice_menu, &history_item, &forget, &sep3, &model_menu, &code, &code_folder, &code_window, &crew, &crew_open, &key, &sep, &choose, &follow, &fade, &bar_menu, &reset, &reload, &sep2, &quit])?;
     // Kept so a right-click on the avatar can pop up the same menu; its
     // clicks go through the tray's on_menu_event handler below.
     app.manage(TrayMenu(menu.clone()));
@@ -805,6 +854,11 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                     app.state::<Arc<ModelStore>>().pick_voice(Some(voice));
                 }
                 sync_voice(app, true);
+            }
+            id if id.starts_with("bar:") => {
+                if let Some((_, value, _)) = TOOLBAR_CHOICES.iter().find(|(item_id, _, _)| *item_id == id) {
+                    set_toolbar(app, value, true);
+                }
             }
             id if id.starts_with("model:") => {
                 let model = id.trim_start_matches("model:").to_string();
@@ -989,6 +1043,7 @@ pub fn run() {
             history_open,
             set_voice_enabled,
             set_voice_tuning,
+            set_toolbar_position,
             show_menu
         ])
         .run(tauri::generate_context!())
