@@ -126,6 +126,12 @@ Tick **Crew mode (firstmate)** in the tray. The text box gets a blue border.
 - **Badges** down her right side show each task: blue for working, amber for
   waiting on you, green for PR ready or merged, red for failed. Click one for its
   latest status line, a link to its PR and a button to open the terminal.
+- **Crew sessions…** in the tray (or **All crew** on a badge's card) opens the Crew
+  window: the first mate's state, every crewmate grouped by what it needs (needs you,
+  failed, ready, working, paused), and for the one you pick its project, agent,
+  start time, PR and a timeline of everything it reported. Tasks that were cleaned
+  up while the app was watching are kept under **Finished**. **Watch in crew
+  terminal** opens Herdr, where each crewmate has its own pane.
 - **She speaks up by herself only when something needs you**: a task needs a decision
   or is blocked, a task failed, a PR is ready, or a PR was merged.
 

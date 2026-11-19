@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions for the avatar and chat history windows",
-  "windows": ["main", "history"],
+  "description": "Permissions for the avatar, chat history and crew windows",
+  "windows": ["main", "history", "crew"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",

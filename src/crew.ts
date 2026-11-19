@@ -19,6 +19,7 @@ export class CrewUI {
       const action = target.closest<HTMLElement>("[data-action]")?.dataset.action;
       if (action === "close") this.showCard(null);
       if (action === "terminal") void host.crewOpenTerminal();
+      if (action === "all") host.crewWindowOpen();
       if (action === "pr") {
         const pr = this.tasks.find((t) => t.id === this.open)?.pr;
         if (pr) void host.openUrl(pr);
@@ -78,7 +79,7 @@ export class CrewUI {
       return b;
     };
     if (t.pr) actions.append(button("Open PR", "pr"));
-    actions.append(button("Open terminal", "terminal"), button("Close", "close"));
+    actions.append(button("All crew", "all"), button("Open terminal", "terminal"), button("Close", "close"));
     this.card.replaceChildren(title, meta, text, actions);
   }
 }

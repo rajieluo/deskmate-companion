@@ -147,6 +147,22 @@ pub struct FirstMate {
 }
 
 impl FirstMate {
+    /// For the Crew window: "stopped", "starting", "busy" (a turn in flight) or "idle".
+    pub fn status(&self) -> &'static str {
+        let running = match self.live.try_lock() {
+            // Held while the session starts (or for a moment while a message goes in).
+            Err(_) => return if self.turns.lock().unwrap().pending.front() == Some(&None) { "starting" } else { "busy" },
+            Ok(live) => live.is_some(),
+        };
+        let t = self.turns.lock().unwrap();
+        match (running, t.pending.front()) {
+            (false, _) => "stopped",
+            (true, Some(None)) => "starting",
+            (true, _) if t.open || !t.pending.is_empty() => "busy",
+            _ => "idle",
+        }
+    }
+
     /// Sends the captain's message `text` as turn `turn`. Starts the session if needed.
     pub async fn send<R: Runtime>(self: &Arc<Self>, app: &AppHandle<R>, turn: u64, text: &str) -> Result<(), String> {
         let mut live = self.live.lock().await;

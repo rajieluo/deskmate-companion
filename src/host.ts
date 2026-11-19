@@ -330,6 +330,43 @@ export interface CrewTask {
   text: string;
   pr: string | null;
   updated: number;
+  harness?: string | null;
+  model?: string | null;
+  started?: number;
+  /** Set for finished (cleaned-up) tasks. */
+  ended?: number | null;
+  events?: CrewEvent[];
+}
+
+/** One line in a task's timeline. */
+export interface CrewEvent {
+  ts: number;
+  /** dispatched, status, pr-ready, merged, cleaned-up */
+  kind: string;
+  state: string | null;
+  text: string;
+}
+
+/** Everything the Crew window shows (see crew_fleet in src-tauri/src/lib.rs). */
+export interface CrewFleet {
+  on: boolean;
+  direct: boolean;
+  home: string;
+  /** stopped, starting, busy, idle, or separate (notes mode) */
+  mate: string;
+  session: string | null;
+  polled: number | null;
+  error: string | null;
+  tasks: CrewTask[];
+  finished: CrewTask[];
+}
+
+export async function crewFleet(): Promise<CrewFleet | null> {
+  return inTauri ? invoke<CrewFleet>("crew_fleet") : null;
+}
+
+export function crewWindowOpen() {
+  if (inTauri) void invoke("crew_window_open");
 }
 
 export interface CrewAttention {
