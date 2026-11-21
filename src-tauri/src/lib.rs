@@ -18,7 +18,7 @@ use chat::{Chat, ChatConfig};
 use model::{ModelInfo, ModelStore};
 use serde::Serialize;
 use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
     AppHandle, Emitter, Manager, PhysicalPosition, Runtime, State, WebviewWindow,
 };
@@ -45,6 +45,9 @@ struct ChatStatus {
     has_key: bool,
     name: String,
     model: String,
+    voice_enabled: bool,
+    voice: String,
+    voice_speed: f32,
 }
 
 #[tauri::command]
@@ -54,6 +57,9 @@ fn chat_status(store: State<'_, Arc<ModelStore>>) -> ChatStatus {
         has_key: chat::get_api_key().is_some(),
         name: s.character_name.unwrap_or_else(|| DEFAULT_NAME.into()),
         model: s.chat_model.unwrap_or_else(|| chat::DEFAULT_MODEL.into()),
+        voice_enabled: s.voice_enabled.unwrap_or(true),
+        voice: s.voice.unwrap_or_else(|| "af_heart".into()),
+        voice_speed: s.voice_speed.unwrap_or(1.0).clamp(0.5, 2.0),
     }
 }
 
@@ -164,12 +170,14 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let talk = MenuItem::with_id(app, "talk", "Talk (Ctrl+Shift+Space)", true, None::<&str>)?;
     let forget = MenuItem::with_id(app, "forget", "Forget conversation", true, None::<&str>)?;
     let key = MenuItem::with_id(app, "key", "Set API key…", true, None::<&str>)?;
+    let voice_on = app.state::<Arc<ModelStore>>().settings().voice_enabled.unwrap_or(true);
+    let voice = CheckMenuItem::with_id(app, "voice", "Speak replies", true, voice_on, None::<&str>)?;
     let reload = MenuItem::with_id(app, "reload", "Reload", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let menu =
-        Menu::with_items(app, &[&talk, &forget, &key, &sep, &choose, &reset, &reload, &sep2, &quit])?;
+        Menu::with_items(app, &[&talk, &voice, &forget, &key, &sep, &choose, &reset, &reload, &sep2, &quit])?;
 
     let mut tray = TrayIconBuilder::with_id("main")
         .tooltip("Desktop Assistant")
@@ -188,6 +196,12 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             "forget" => {
                 app.state::<Arc<Chat>>().reset();
                 let _ = app.emit("chat-reset", ());
+            }
+            "voice" => {
+                let store = app.state::<Arc<ModelStore>>();
+                let on = !store.settings().voice_enabled.unwrap_or(true);
+                store.update(|s| s.voice_enabled = Some(on));
+                let _ = app.emit("voice-changed", on);
             }
             "key" => {
                 open_chat(app);

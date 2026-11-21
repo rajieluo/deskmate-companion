@@ -1,7 +1,9 @@
 // Speech bubble + text box for talking to Claude.
 import type { Avatar } from "./avatar";
 import * as host from "./host";
+import { SentenceBuffer, speakable } from "./sentences";
 import { TagStream } from "./tags";
+import type { Voice } from "./voice";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -14,10 +16,14 @@ export class ChatUI {
   private keyInput = $<HTMLInputElement>("api-key-input");
   private turn = 0;
   private tags = new TagStream();
+  private sentences = new SentenceBuffer();
   private hideTimer: number | undefined;
   private name = "Aqua";
 
-  constructor(private avatar: Avatar) {
+  constructor(
+    private avatar: Avatar,
+    private voice: Voice,
+  ) {
     host.onChat({
       delta: (turn, text) => turn === this.turn && this.onDelta(text),
       done: (turn) => turn === this.turn && this.onDone(),
@@ -79,6 +85,8 @@ export class ChatUI {
       return;
     }
     this.tags = new TagStream();
+    this.sentences = new SentenceBuffer();
+    this.voice.stop();
     this.say("…");
     this.bubbleText.textContent = "";
     this.bubble.classList.add("thinking");
@@ -91,11 +99,14 @@ export class ChatUI {
     if (text) {
       this.bubble.classList.remove("thinking");
       this.append(text);
+      for (const s of this.sentences.push(text)) this.voice.say(speakable(s));
     }
   }
 
   private onDone() {
-    this.append(this.tags.end().text);
+    const rest = this.tags.end().text;
+    this.append(rest);
+    for (const s of [...this.sentences.push(rest), ...this.sentences.flush()]) this.voice.say(speakable(s));
     this.bubble.classList.remove("thinking");
     const words = (this.bubbleText.textContent ?? "").split(/\s+/).length;
     this.scheduleHide(Math.min(30000, 5000 + words * 350));
@@ -149,9 +160,16 @@ export class ChatUI {
   private scheduleHide(ms: number) {
     window.clearTimeout(this.hideTimer);
     this.hideTimer = window.setTimeout(() => {
+      // Keep the bubble up until she has finished talking.
+      if (this.voice.speaking) return this.scheduleHide(1500);
       this.bubble.hidden = true;
       this.bubble.removeAttribute("data-hit");
     }, ms);
+  }
+
+  /** Shows a status line (e.g. voice download progress); empty text hides it. */
+  status(text: string) {
+    if (text) this.say(text, 4000);
   }
 
   get characterName() {

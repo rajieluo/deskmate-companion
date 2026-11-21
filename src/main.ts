@@ -2,6 +2,7 @@ import { Avatar } from "./avatar";
 import { ChatUI } from "./chat";
 import * as host from "./host";
 import { EMOTIONS } from "./motions";
+import { BeepEngine, KokoroEngine, Voice } from "./voice";
 
 const canvas = document.getElementById("stage") as HTMLCanvasElement;
 const statusBox = document.getElementById("status") as HTMLDivElement;
@@ -9,7 +10,25 @@ const statusText = document.getElementById("status-text") as HTMLParagraphElemen
 const statusPick = document.getElementById("status-pick") as HTMLButtonElement;
 
 const avatar = new Avatar(canvas);
-const chat = new ChatUI(avatar);
+const kokoro = new KokoroEngine();
+const useBeep = !host.inTauri && new URLSearchParams(location.search).get("tts") === "beep";
+const voice = new Voice(useBeep ? new BeepEngine() : kokoro);
+avatar.setMouthSource(() => voice.level());
+(window as unknown as { voice: Voice }).voice = voice;
+const chat = new ChatUI(avatar, voice);
+kokoro.onStatus = (s) => chat.status(s);
+void host.chatStatus().then((s) => {
+  voice.enabled = s.voice_enabled;
+  kokoro.voice = s.voice;
+  kokoro.speed = s.voice_speed;
+  // Start the (large, first-time) model download early instead of on the first reply.
+  if (s.voice_enabled && !useBeep) kokoro.warmUp();
+});
+host.onVoiceChanged((on) => {
+  voice.enabled = on;
+  if (!on) voice.stop();
+  else if (!useBeep) kokoro.warmUp();
+});
 // Exposed for debugging from the devtools console and for tests.
 (window as unknown as { avatar: Avatar }).avatar = avatar;
 

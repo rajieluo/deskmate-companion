@@ -13,10 +13,13 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export class Avatar {
   readonly app: PIXI.Application;
-  private model: Live2DModel | null = null;
+  model: Live2DModel | null = null;
   private crop: Crop = FULL_CROP;
   private groups: Record<string, unknown[]> = {};
   private loadId = 0;
+  private lipSyncIds: string[] = [];
+  private mouthSource: (() => number) | null = null;
+  private mouthWasOpen = false;
   summary: MotionSummary | null = null;
   zoom = 1;
   /** CSS px kept free above the character for the speech bubble. */
@@ -62,6 +65,8 @@ export class Avatar {
     }
     this.model = model;
     this.groups = settings.FileReferences.Motions ?? {};
+    this.lipSyncIds = lipSyncIds(json);
+    model.internalModel.on("beforeModelUpdate", () => this.applyMouth());
     this.summary = summary;
     model.alpha = 0;
     this.app.stage.addChild(model);
@@ -158,8 +163,33 @@ export class Avatar {
     return true;
   }
 
+  /** Drives the mouth from a 0..1 level (e.g. voice loudness) every frame. */
+  setMouthSource(source: () => number) {
+    this.mouthSource = source;
+  }
+
+  private applyMouth() {
+    const model = this.model;
+    if (!model || !this.mouthSource) return;
+    const v = this.mouthSource();
+    // Only take over the mouth while speaking, so motions keep their own mouth shapes otherwise.
+    if (v <= 0 && !this.mouthWasOpen) return;
+    this.mouthWasOpen = v > 0;
+    const core = model.internalModel.coreModel as unknown as {
+      setParameterValueById(id: string, value: number, weight?: number): void;
+    };
+    for (const id of this.lipSyncIds) core.setParameterValueById(id, v);
+  }
+
   /** Makes the character look towards a point in CSS pixels. */
   lookAt(x: number, y: number) {
     this.model?.focus(x, y);
   }
+}
+
+/** Mouth parameter ids: the model's LipSync group, or the standard names. */
+function lipSyncIds(settings: ModelSettingsJson): string[] {
+  const groups = (settings as { Groups?: { Name?: string; Ids?: string[] }[] }).Groups ?? [];
+  const ids = groups.find((g) => g.Name === "LipSync")?.Ids ?? [];
+  return ids.length ? ids : ["ParamMouthOpenY", "PARAM_MOUTH_OPEN_Y"];
 }
