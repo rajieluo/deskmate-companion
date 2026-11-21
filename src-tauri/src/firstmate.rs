@@ -117,20 +117,65 @@ pub fn edge(line: &str) -> Edge {
     }
 }
 
+/// True for Claude Code's echo of a message it just read from stdin
+/// (`--replay-user-messages`), as opposed to a tool result.
+pub fn is_replayed_message(line: &str) -> bool {
+    let Ok(v) = serde_json::from_str::<Value>(line.trim()) else { return false };
+    v["type"] == "user"
+        && v["isReplay"] == true
+        && !v["message"]["content"]
+            .as_array()
+            .is_some_and(|blocks| blocks.iter().any(|b| b["type"] == "tool_result"))
+}
+
 /// Who the text being streamed belongs to.
 #[derive(Default)]
 struct Turns {
-    /// Messages not yet answered, oldest first: the captain's turn, or None for the
-    /// app's own start-up message.
+    /// Messages Claude Code hasn't read yet, oldest first: the captain's turn, or None
+    /// for the app's own start-up message.
     pending: VecDeque<Option<u64>>,
+    /// Messages Claude Code has read for the reply in progress. A message sent while she
+    /// is mid-reply is usually read into that same reply, so one reply can answer several.
+    covered: Vec<Option<u64>>,
     /// The reply being streamed is for this message (None: a turn she started herself).
     current: Option<u64>,
     /// A reply is being streamed.
     open: bool,
-    /// The reply answers the front of `pending` (else she started the turn herself).
+    /// The reply answers the front of `pending`: the fallback when Claude Code doesn't
+    /// echo the messages it reads.
     answering: bool,
     /// Text of a turn she started herself, read out when it ends.
     own: String,
+}
+
+impl Turns {
+    /// The app's start-up message hasn't been answered yet.
+    fn starting(&self) -> bool {
+        self.pending.front() == Some(&None) || self.covered.first() == Some(&None)
+    }
+
+    /// Claude Code read the oldest message: the reply now answers it (the newest of the
+    /// captain's messages read so far is the one the chat is showing).
+    fn read_one(&mut self) {
+        if let Some(message) = self.pending.pop_front() {
+            self.covered.push(message);
+            if let Some(turn) = message {
+                self.current = Some(turn);
+            }
+        }
+    }
+
+    /// The reply ended: returns the captain's message to report it for (None: a turn she
+    /// started herself, or only the start-up message), and clears what it answered.
+    fn finish(&mut self) -> Option<u64> {
+        if !self.covered.is_empty() {
+            self.covered.clear();
+        } else if self.answering {
+            self.pending.pop_front();
+        }
+        self.answering = false;
+        self.current.take()
+    }
 }
 
 struct Live {
@@ -151,15 +196,15 @@ impl FirstMate {
     pub fn status(&self) -> &'static str {
         let running = match self.live.try_lock() {
             // Held while the session starts (or for a moment while a message goes in).
-            Err(_) => return if self.turns.lock().unwrap().pending.front() == Some(&None) { "starting" } else { "busy" },
+            Err(_) => return if self.turns.lock().unwrap().starting() { "starting" } else { "busy" },
             Ok(live) => live.is_some(),
         };
         let t = self.turns.lock().unwrap();
-        match (running, t.pending.front()) {
-            (false, _) => "stopped",
-            (true, Some(None)) => "starting",
-            (true, _) if t.open || !t.pending.is_empty() => "busy",
-            _ => "idle",
+        match running {
+            false => "stopped",
+            true if t.starting() => "starting",
+            true if t.open || !t.pending.is_empty() || !t.covered.is_empty() => "busy",
+            true => "idle",
         }
     }
 
@@ -172,7 +217,7 @@ impl FirstMate {
         }
         {
             let mut t = self.turns.lock().unwrap();
-            if t.pending.front() == Some(&None) {
+            if t.starting() {
                 let text = "Still getting the crew's records out. The first start takes a few minutes…".into();
                 let _ = app.emit("chat-activity", Activity { turn, text });
             }
@@ -274,8 +319,10 @@ impl FirstMate {
                 let mut t = me.turns.lock().unwrap();
                 t.current = None;
                 t.open = false;
+                t.answering = false;
                 t.own.clear();
-                t.pending.drain(..).flatten().collect()
+                let covered: Vec<Option<u64>> = t.covered.drain(..).collect();
+                covered.into_iter().chain(t.pending.drain(..)).flatten().collect()
             };
             let last = err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim().to_string();
             for turn in failed {
@@ -296,70 +343,91 @@ impl FirstMate {
                 store.update(|s| s.crew_session = id);
             }
         }
-        let mut t = self.turns.lock().unwrap();
+        let (emits, closed) = self.turns.lock().unwrap().on_line(line, outs);
+        if closed {
+            parser.next_turn();
+        }
+        for e in emits {
+            let _ = match e {
+                Emit::Delta(turn, text) => app.emit("chat-delta", Delta { turn, text }),
+                Emit::Activity(turn, text) => app.emit("chat-activity", Activity { turn, text }),
+                Emit::Done(turn) => app.emit("chat-done", Done { turn, model: None, stop_reason: None }),
+                Emit::Error(turn, message) => app.emit("chat-error", ChatError { turn, message, kind: "crew".into() }),
+                Emit::Own(text) => app.emit("crew-reply", text),
+            };
+        }
+    }
+}
+
+/// What one stdout line makes the app tell the chat.
+#[derive(Debug, PartialEq)]
+enum Emit {
+    Delta(u64, String),
+    Activity(u64, String),
+    Done(u64),
+    Error(u64, String),
+    /// What she said in a turn she started herself.
+    Own(String),
+}
+
+impl Turns {
+    /// Turn bookkeeping for one stdout line and what the parser got from it. Returns
+    /// what to tell the chat, and whether a reply ended.
+    fn on_line(&mut self, line: &str, outs: Vec<Out>) -> (Vec<Emit>, bool) {
+        let mut emits = vec![];
+        if is_replayed_message(line) {
+            self.read_one();
+            return (emits, false);
+        }
         for out in outs {
-            if !t.open {
-                t.open = true;
-                t.current = t.pending.front().copied().flatten();
-                t.answering = !t.pending.is_empty();
+            if !self.open {
+                self.open = true;
+                if self.covered.is_empty() {
+                    // Claude Code didn't say which message it read: the oldest one.
+                    self.current = self.pending.front().copied().flatten();
+                    self.answering = !self.pending.is_empty();
+                }
             }
-            match (out, t.current) {
-                (Out::Text(text), Some(turn)) => {
-                    let _ = app.emit("chat-delta", Delta { turn, text });
-                }
-                (Out::Text(text), None) => t.own.push_str(&text),
-                (Out::Activity(text), Some(turn)) => {
-                    let _ = app.emit("chat-activity", Activity { turn, text });
-                }
+            match (out, self.current) {
+                (Out::Text(text), Some(turn)) => emits.push(Emit::Delta(turn, text)),
+                (Out::Text(text), None) => self.own.push_str(&text),
+                (Out::Activity(text), Some(turn)) => emits.push(Emit::Activity(turn, text)),
                 (Out::Activity(_), None) => {}
             }
         }
         let end = match edge(line) {
-            Edge::None => return,
+            Edge::None => return (emits, false),
             Edge::EndTurn => None,
             Edge::Result(error) => Some(error),
         };
-        if !t.open {
-            // Nothing was streamed. A reply that ended empty answers the oldest message;
-            // so does a failed result. A plain result just follows a reply already ended.
-            match end {
-                None => {
-                    if let Some(Some(turn)) = t.pending.pop_front() {
-                        let _ = app.emit("chat-done", Done { turn, model: None, stop_reason: None });
-                    }
-                }
-                Some(Some(message)) => {
-                    if let Some(Some(turn)) = t.pending.pop_front() {
-                        let _ = app.emit("chat-error", ChatError { turn, message, kind: "crew".into() });
-                    }
-                }
-                Some(None) => {}
+        if !self.open {
+            // Nothing was streamed. A reply that ended empty answers what was read for it
+            // (or the oldest message); so does a failed result. A plain result just follows
+            // a reply already ended.
+            if let Some(None) = end {
+                return (emits, false);
             }
-            return;
-        }
-        t.open = false;
-        parser.next_turn();
-        if t.answering {
-            t.pending.pop_front();
-        }
-        match t.current.take() {
-            Some(turn) => {
-                match end {
-                    Some(Some(message)) => {
-                        let _ = app.emit("chat-error", ChatError { turn, message, kind: "crew".into() });
-                    }
-                    _ => {
-                        let _ = app.emit("chat-done", Done { turn, model: None, stop_reason: None });
-                    }
-                }
+            let turn = if self.covered.is_empty() { self.pending.pop_front().flatten() } else { self.finish() };
+            self.own.clear();
+            if let Some(turn) = turn {
+                emits.push(match end {
+                    Some(Some(message)) => Emit::Error(turn, message),
+                    _ => Emit::Done(turn),
+                });
             }
-            None => {
-                let said = std::mem::take(&mut t.own);
-                if !is_quiet(&said) {
-                    let _ = app.emit("crew-reply", said.trim().to_string());
-                }
-            }
+            return (emits, false);
         }
+        self.open = false;
+        let said = std::mem::take(&mut self.own);
+        match self.finish() {
+            Some(turn) => emits.push(match end {
+                Some(Some(message)) => Emit::Error(turn, message),
+                _ => Emit::Done(turn),
+            }),
+            None if !is_quiet(&said) => emits.push(Emit::Own(said.trim().to_string())),
+            None => {}
+        }
+        (emits, true)
     }
 }
 
@@ -395,6 +463,80 @@ mod tests {
             edge(r#"{"type":"result","subtype":"error_during_execution","is_error":true,"result":"boom"}"#),
             Edge::Result(Some("boom".into()))
         );
+    }
+
+    const REPLAY: &str = r#"{"type":"user","message":{"role":"user","content":"hi"},"isReplay":true}"#;
+    const TOOL_RESULT: &str =
+        r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"x"}]},"isReplay":true}"#;
+    const END: &str = r#"{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"end_turn"}}}"#;
+    const RESULT: &str = r#"{"type":"result","subtype":"success","is_error":false}"#;
+    const OTHER: &str = r#"{"type":"stream_event","event":{"type":"content_block_delta"}}"#;
+
+    fn text(t: &mut Turns, s: &str) -> Vec<Emit> {
+        t.on_line(OTHER, vec![Out::Text(s.into())]).0
+    }
+
+    #[test]
+    fn spots_replayed_messages() {
+        assert!(is_replayed_message(REPLAY));
+        assert!(!is_replayed_message(TOOL_RESULT));
+        assert!(!is_replayed_message(RESULT));
+    }
+
+    #[test]
+    fn a_message_sent_mid_reply_gets_the_rest_of_that_reply() {
+        let mut t = Turns::default();
+        t.pending.push_back(Some(1));
+        t.on_line(REPLAY, vec![]);
+        assert_eq!(text(&mut t, "[happy] Chatterbox"), vec![Emit::Delta(1, "[happy] Chatterbox".into())]);
+        t.pending.push_back(Some(2)); // sent while she's still answering 1
+        t.on_line(REPLAY, vec![]); // ...and Claude Code reads it into the same reply
+        assert_eq!(text(&mut t, " and Turbo"), vec![Emit::Delta(2, " and Turbo".into())]);
+        assert_eq!(t.on_line(END, vec![]), (vec![Emit::Done(2)], true));
+        assert_eq!(t.on_line(RESULT, vec![]).0, vec![]);
+        assert!(t.pending.is_empty() && t.covered.is_empty());
+        // The next message is answered as itself, not one behind.
+        t.pending.push_back(Some(3));
+        t.on_line(REPLAY, vec![]);
+        assert_eq!(text(&mut t, "Qwen"), vec![Emit::Delta(3, "Qwen".into())]);
+        assert_eq!(t.on_line(END, vec![]).0, vec![Emit::Done(3)]);
+    }
+
+    #[test]
+    fn a_message_read_after_the_reply_gets_its_own() {
+        let mut t = Turns::default();
+        t.pending.push_back(Some(1));
+        t.on_line(REPLAY, vec![]);
+        text(&mut t, "one");
+        t.pending.push_back(Some(2)); // not read until the next turn
+        assert_eq!(t.on_line(END, vec![]).0, vec![Emit::Done(1)]);
+        t.on_line(RESULT, vec![]);
+        t.on_line(REPLAY, vec![]);
+        assert_eq!(text(&mut t, "two"), vec![Emit::Delta(2, "two".into())]);
+        assert_eq!(t.on_line(END, vec![]).0, vec![Emit::Done(2)]);
+    }
+
+    #[test]
+    fn without_replays_the_oldest_message_is_answered() {
+        let mut t = Turns::default();
+        t.pending.push_back(Some(1));
+        assert_eq!(text(&mut t, "hi"), vec![Emit::Delta(1, "hi".into())]);
+        assert_eq!(t.on_line(END, vec![]).0, vec![Emit::Done(1)]);
+        assert!(t.pending.is_empty());
+    }
+
+    #[test]
+    fn start_up_and_her_own_turns_are_not_chat_replies() {
+        let mut t = Turns::default();
+        t.pending.push_back(None);
+        assert!(t.starting());
+        t.on_line(REPLAY, vec![]);
+        assert!(t.starting());
+        assert_eq!(text(&mut t, "[neutral]"), vec![]);
+        assert_eq!(t.on_line(END, vec![]).0, vec![]);
+        assert!(!t.starting());
+        text(&mut t, "[happy] The PR merged.");
+        assert_eq!(t.on_line(END, vec![]).0, vec![Emit::Own("[happy] The PR merged.".into())]);
     }
 
     #[test]

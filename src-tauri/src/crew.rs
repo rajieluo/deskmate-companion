@@ -170,8 +170,10 @@ case $cmd in
     # Give session start room to finish inside Claude Code's 180 s hook limit, so the
     # first mate doesn't have to run it again (Windows is slow at it).
     export FM_SESSION_START_TIMEOUT=${FM_SESSION_START_TIMEOUT:-170}
+    # --replay-user-messages echoes each message when Claude Code reads it, so the app
+    # knows which messages a reply answers (one sent mid-reply is read into that reply).
     set -- -p --input-format stream-json --output-format stream-json --verbose \
-      --include-partial-messages --permission-mode "$2" --append-system-prompt-file "$1" \
+      --include-partial-messages --replay-user-messages --permission-mode "$2" --append-system-prompt-file "$1" \
       ${3:+--resume "$3"}
     exec claude "$@"
     ;;
