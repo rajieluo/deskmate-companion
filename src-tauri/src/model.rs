@@ -149,6 +149,11 @@ impl ModelStore {
             .unwrap_or_else(|| "Assistant".into())
     }
 
+    /// The current model's persona file, if it has one. See `find_persona`.
+    pub fn model_persona(&self) -> Option<String> {
+        find_persona(self.settings_file.parent()?, &self.current_dir()?)
+    }
+
     /// Name of the current model's folder.
     pub fn folder_name(&self) -> Option<String> {
         let s = self.settings();
@@ -365,6 +370,44 @@ mod tests {
 
 /// A display name from a model folder name: "1014100aqua" -> "Aqua", "Nicole" -> "Nicole",
 /// "mori_suit" -> "Mori Suit", "weixi_2" -> "Weixi", "l2d01.u" -> "L2d01".
+/// A model's own personality, read fresh on every message so edits apply right away.
+/// Looks for `personas\<model folder name>.md` (or `.txt`) in the app's config folder,
+/// then `persona.md` (or `.txt`) inside the model's folder.
+pub fn find_persona(config_dir: &Path, model_dir: &Path) -> Option<String> {
+    let folder = model_dir.file_name()?.to_string_lossy().into_owned();
+    let personas = config_dir.join("personas");
+    let candidates = [
+        personas.join(format!("{folder}.md")),
+        personas.join(format!("{folder}.txt")),
+        model_dir.join("persona.md"),
+        model_dir.join("persona.txt"),
+    ];
+    candidates.iter().find_map(|p| {
+        let text = fs::read_to_string(p).ok()?;
+        // Notepad may save a byte-order mark.
+        let text = strip_front_matter(text.trim_start_matches('\u{feff}')).trim();
+        (!text.is_empty()).then(|| text.to_string())
+    })
+}
+
+/// Drops a `---` front matter block at the top (settings such as `voice:`, read by
+/// `voices::folder_voice`), so only the character description reaches Claude.
+fn strip_front_matter(text: &str) -> &str {
+    let mut lines = text.split_inclusive('\n');
+    if lines.next().map(str::trim) != Some("---") {
+        return text;
+    }
+    let mut offset = text.split_inclusive('\n').next().map_or(0, str::len);
+    for line in lines {
+        offset += line.len();
+        if line.trim() == "---" {
+            return &text[offset..];
+        }
+    }
+    // No closing line: not front matter after all.
+    text
+}
+
 pub fn name_from_folder(folder: &str) -> Option<String> {
     let base = folder.strip_suffix(".u").unwrap_or(folder);
     let base = base.trim_start_matches(|c: char| c.is_ascii_digit());
@@ -377,6 +420,38 @@ pub fn name_from_folder(folder: &str) -> Option<String> {
         })
         .collect();
     (!words.is_empty()).then(|| words.join(" "))
+}
+
+#[cfg(test)]
+mod persona_tests {
+    use super::find_persona;
+    use std::fs;
+
+    #[test]
+    fn finds_persona_files_in_order() {
+        let root = std::env::temp_dir().join(format!("persona-test-{}", std::process::id()));
+        let config = root.join("config");
+        let model = root.join("models").join("Nicole");
+        fs::create_dir_all(config.join("personas")).unwrap();
+        fs::create_dir_all(&model).unwrap();
+        assert_eq!(find_persona(&config, &model), None);
+
+        fs::write(model.join("persona.md"), "\u{feff}  From the model folder.\n").unwrap();
+        assert_eq!(find_persona(&config, &model).as_deref(), Some("From the model folder."));
+
+        fs::write(model.join("persona.md"), "---\r\nvoice: af_bella\r\n---\r\nFrom the model folder.\r\n").unwrap();
+        assert_eq!(find_persona(&config, &model).as_deref(), Some("From the model folder."));
+        fs::write(model.join("persona.md"), "---\nnot closed\n").unwrap();
+        assert_eq!(find_persona(&config, &model).as_deref(), Some("---\nnot closed"));
+        fs::write(model.join("persona.md"), "From the model folder.").unwrap();
+
+        fs::write(config.join("personas").join("Nicole.md"), "From the config folder.").unwrap();
+        assert_eq!(find_persona(&config, &model).as_deref(), Some("From the config folder."));
+
+        fs::write(config.join("personas").join("Nicole.md"), "   ").unwrap();
+        assert_eq!(find_persona(&config, &model).as_deref(), Some("From the model folder."));
+        fs::remove_dir_all(&root).unwrap();
+    }
 }
 
 #[cfg(test)]

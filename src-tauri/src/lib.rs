@@ -269,6 +269,7 @@ async fn chat_send<R: Runtime>(
 ) -> Result<u64, String> {
     let s = store.settings();
     let name = store.character_name();
+    let character = store.model_persona();
     if s.brain.as_deref() == Some("claude_code") {
         let config = claude_code::RunConfig {
             folder: s.claude_code_folder.clone().unwrap_or_default(),
@@ -278,6 +279,7 @@ async fn chat_send<R: Runtime>(
                 .unwrap_or_else(|| claude_code::DEFAULT_PERMISSION_MODE.into()),
             prompt_file: app.path().app_config_dir().map_err(|e| e.to_string())?.join("avatar-prompt.txt"),
             name,
+            character,
         };
         let code = code.inner().clone();
         let turn = code.begin();
@@ -287,7 +289,11 @@ async fn chat_send<R: Runtime>(
     let config = ChatConfig {
         model: s.chat_model.unwrap_or_else(|| chat::DEFAULT_MODEL.into()),
         effort: s.chat_effort.unwrap_or_else(|| chat::DEFAULT_EFFORT.into()),
-        persona: s.persona.unwrap_or_else(|| chat::default_persona(&name)),
+        // A persona file for this model wins; then the global `persona` setting; then the built-in one.
+        persona: match character {
+            Some(text) => chat::persona_prompt(&name, Some(&text)),
+            None => s.persona.unwrap_or_else(|| chat::default_persona(&name)),
+        },
     };
     // Return the turn number right away and stream in the background. (Awaiting the
     // whole reply here meant the page learned the turn only after every event had

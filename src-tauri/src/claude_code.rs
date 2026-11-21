@@ -28,8 +28,8 @@ pub struct Activity {
     pub text: String,
 }
 
-pub fn avatar_prompt(name: &str) -> String {
-    format!(
+pub fn avatar_prompt(name: &str, character: Option<&str>) -> String {
+    let mut prompt = format!(
         "You are also {name}, an animated character on the user's desktop, and everything you write \
 is shown in a small speech bubble and read aloud. Work on the user's request as usual, but keep \
 what you write short and conversational: no Markdown, no lists, no code blocks in your messages \
@@ -37,7 +37,15 @@ what you write short and conversational: no Markdown, no lists, no code blocks i
 you use. Finish with one to three spoken sentences saying what you did or found. Start each \
 message with exactly one emotion tag from: {EMOTION_TAGS}. The tags are hidden from the user and \
 make your body move."
-    )
+    );
+    if let Some(text) = character {
+        prompt.push_str(&format!(
+            "\n\nYour character, for how you talk to the user:\n{text}\n\n\
+Let the character color your tone and your short spoken summaries only. The work itself (code, \
+files, commands, facts) stays careful, correct and complete, exactly as it would be without the act."
+        ));
+    }
+    prompt
 }
 
 #[derive(Default)]
@@ -51,6 +59,8 @@ pub struct RunConfig {
     pub permission_mode: String,
     pub prompt_file: PathBuf,
     pub name: String,
+    /// The model's persona file, if it has one.
+    pub character: Option<String>,
 }
 
 /// Finds the `claude` executable: claude.exe (native installer) or claude.cmd (npm) on PATH.
@@ -106,7 +116,7 @@ impl ClaudeCode {
             error("no_folder", "Pick a folder for Claude Code to work in first.".into());
             return turn;
         }
-        if let Err(e) = std::fs::write(&config.prompt_file, avatar_prompt(&config.name)) {
+        if let Err(e) = std::fs::write(&config.prompt_file, avatar_prompt(&config.name, config.character.as_deref())) {
             error("api", format!("Couldn't write the avatar prompt: {e}"));
             return turn;
         }
@@ -383,7 +393,9 @@ mod tests {
     }
 
     #[test]
-    fn prompt_has_no_newlines() {
-        assert!(!avatar_prompt("Aqua").contains('\n'));
+    fn prompt_adds_the_character_only_when_given() {
+        assert!(!avatar_prompt("Aqua", None).contains("Your character"));
+        let p = avatar_prompt("Nicole", Some("Boss of a tiny agency."));
+        assert!(p.contains("Boss of a tiny agency.") && p.contains("careful, correct and complete"));
     }
 }
