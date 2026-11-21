@@ -1,0 +1,15 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+# Live2D Cubism Core is fetched at install time (Live2D proprietary license), never committed
+public/vendor/
+# Test fixtures (Live2D sample models) are downloaded, never committed
+tests/fixtures/*
+!tests/fixtures/.gitkeep
+# Never commit user Live2D models
+*.moc3
+*.moc
+*.model3.json
+*.motion3.json
+*.physics3.json

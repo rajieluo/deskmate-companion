@@ -1,0 +1,46 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+#status {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: 24px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(20, 24, 40, 0.85);
+  color: #f2f4ff;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+#status p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+#status button {
+  margin-top: 10px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: #7aa7ff;
+  color: #10142a;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}

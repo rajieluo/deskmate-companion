@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Desktop Assistant</title>
+    <link rel="stylesheet" href="/src/style.css" />
+    <!-- Live2D Cubism Core (proprietary, fetched by scripts/fetch-cubism-core.mjs) -->
+    <script src="/vendor/live2dcubismcore.min.js"></script>
+  </head>
+  <body>
+    <canvas id="stage"></canvas>
+    <div id="status" hidden>
+      <p id="status-text"></p>
+      <button id="status-pick" type="button" hidden>Choose model…</button>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
