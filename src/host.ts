@@ -234,6 +234,24 @@ export async function chatSend(text: string): Promise<number> {
   return turn;
 }
 
+/** Forgets the conversation: the next message starts a fresh session. */
+export async function chatReset() {
+  if (inTauri) await invoke("chat_reset");
+}
+
+/** Claude Code's slash commands for the current folder, for the "/" menu. */
+export async function codeCommands(): Promise<{ name: string; description: string; app: boolean }[]> {
+  if (!inTauri) {
+    return [
+      { name: "clear", description: "Start a fresh session (forget this conversation)", app: true },
+      { name: "folder", description: "Pick the folder Claude Code works in", app: true },
+      { name: "tft", description: "Teamfight Tactics coach", app: false },
+      { name: "code-review", description: "Review the current changes for bugs", app: false },
+    ];
+  }
+  return invoke("code_commands");
+}
+
 export async function chatCancel() {
   if (inTauri) await invoke("chat_cancel");
   else browserTurn++;
