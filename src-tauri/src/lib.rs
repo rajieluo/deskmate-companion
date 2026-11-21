@@ -408,6 +408,17 @@ fn chat_reset(chat: State<'_, Arc<Chat>>, code: State<'_, Arc<ClaudeCode>>) {
     code.reset();
 }
 
+/// The chat box's "/" menu in Claude Code mode.
+#[tauri::command]
+async fn code_commands(
+    store: State<'_, Arc<ModelStore>>,
+    code: State<'_, Arc<ClaudeCode>>,
+) -> Result<Vec<claude_code::SlashCommand>, String> {
+    let folder = store.settings().claude_code_folder.ok_or("Pick a folder for Claude Code to work in first.")?;
+    let code = code.inner().clone();
+    code.commands(&folder).await
+}
+
 /// Lets the user pick the folder Claude Code works in, and switches to Claude Code mode.
 #[tauri::command]
 async fn pick_claude_code_folder<R: Runtime>(app: AppHandle<R>) -> Result<Option<String>, String> {
@@ -1093,6 +1104,7 @@ pub fn run() {
             chat_send,
             chat_cancel,
             chat_reset,
+            code_commands,
             stt_prepare,
             tts_prepare,
             tts_synthesize,

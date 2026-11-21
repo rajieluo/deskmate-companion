@@ -6,6 +6,7 @@ import { TagStream } from "./tags";
 import { setLinkedText } from "./links";
 import { Mic } from "./mic";
 import type { Voice } from "./voice";
+import { SlashMenu } from "./slash";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -15,6 +16,8 @@ export class ChatUI {
   private activity = $<HTMLParagraphElement>("bubble-activity");
   private form = $<HTMLFormElement>("chat");
   private input = $<HTMLInputElement>("chat-input");
+  /** Claude Code mode's "/" menu. Created here so its keydown handler runs before ours. */
+  private slash = new SlashMenu(this.input, () => document.body.dataset.brain === "claude_code", host.codeCommands);
   private keyForm = $<HTMLFormElement>("api-key");
   private keyInput = $<HTMLInputElement>("api-key-input");
   private micButton = $<HTMLButtonElement>("mic");
@@ -65,8 +68,9 @@ export class ChatUI {
     this.form.addEventListener("submit", (e) => {
       e.preventDefault();
       const text = this.input.value.trim();
-      if (text) void this.send(text);
       this.input.value = "";
+      this.slash.hide();
+      if (text && !this.appCommand(text)) void this.send(text);
     });
     this.input.addEventListener("keydown", (e) => {
       if (e.key === "Escape") this.close();
@@ -169,8 +173,30 @@ export class ChatUI {
     }
   }
 
+  /**
+   * Slash commands the app handles itself in Claude Code mode. Every other "/command" goes to
+   * Claude Code as typed, which runs it (skills, custom commands, /compact, /context…).
+   */
+  private appCommand(text: string): boolean {
+    if (document.body.dataset.brain !== "claude_code") return false;
+    const cmd = text.toLowerCase();
+    if (cmd === "/clear" || cmd === "/new") {
+      void host.chatReset(); // also stops a reply in progress
+      this.voice.stop();
+      this.say("(Fresh session. The next message starts a new conversation.)", 4000);
+      return true;
+    }
+    if (cmd === "/folder") {
+      this.slash.invalidate();
+      void host.pickClaudeCodeFolder().then((f) => f && this.say(`Working in ${f}`, 4000));
+      return true;
+    }
+    return false;
+  }
+
   private setMode(brain: string) {
     document.body.dataset.brain = brain;
+    this.slash.invalidate();
     this.input.placeholder =
       brain === "claude_code"
         ? `Ask ${this.name} to code…`
@@ -202,6 +228,7 @@ export class ChatUI {
 
   /** Claude Code asked for a new session: the app has already dropped the old one. */
   private async onHandoff(h: host.CodeHandoff) {
+    this.slash.invalidate(); // the folder may have changed
     const where = h.folder.split(/[\\/]/).filter(Boolean).pop() ?? h.folder;
     if (h.error) {
       this.avatar.emote("sad");
@@ -267,6 +294,8 @@ export class ChatUI {
   }
 
   private onDone() {
+    // Each Claude Code run refreshes the command list on the Rust side (new skills, etc.).
+    this.slash.invalidate();
     this.activity.hidden = true;
     const rest = this.tags.end().text;
     this.append(rest);
