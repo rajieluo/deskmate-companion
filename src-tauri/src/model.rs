@@ -33,6 +33,10 @@ pub struct Settings {
     pub voice: Option<String>,
     /// Speaking speed, 0.5 to 2. Default: 1.
     pub voice_speed: Option<f32>,
+    /// Whisper model for voice input: tiny.en, base.en (default), small.en, medium.en, or multilingual ones.
+    pub stt_model: Option<String>,
+    /// Spoken language code for voice input, e.g. "en" (default) or "auto" with a multilingual model.
+    pub stt_language: Option<String>,
 }
 
 #[derive(Clone, Serialize)]

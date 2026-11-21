@@ -3,6 +3,7 @@ import type { Avatar } from "./avatar";
 import * as host from "./host";
 import { SentenceBuffer, speakable } from "./sentences";
 import { TagStream } from "./tags";
+import { Mic } from "./mic";
 import type { Voice } from "./voice";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -14,6 +15,9 @@ export class ChatUI {
   private input = $<HTMLInputElement>("chat-input");
   private keyForm = $<HTMLFormElement>("api-key");
   private keyInput = $<HTMLInputElement>("api-key-input");
+  private micButton = $<HTMLButtonElement>("mic");
+  private mic = new Mic();
+  private transcribing = false;
   private turn = 0;
   private tags = new TagStream();
   private sentences = new SentenceBuffer();
@@ -32,6 +36,12 @@ export class ChatUI {
     host.onEvent("open-chat", () => this.open());
     host.onEvent("open-api-key", () => this.askForKey());
     host.onEvent("chat-reset", () => this.say("(I've forgotten our conversation.)", 4000));
+    host.onEvent("start-listening", () => void this.listen());
+    host.onSttProgress((p) => this.say(`Downloading the speech model (first time only)… ${Math.floor(p)}%`));
+    this.micButton.addEventListener("click", () => {
+      if (this.mic.recording) this.mic.stop();
+      else void this.listen();
+    });
 
     this.form.addEventListener("submit", (e) => {
       e.preventDefault();
@@ -76,6 +86,46 @@ export class ChatUI {
     this.form.hidden = true;
     this.form.removeAttribute("data-hit");
     this.input.blur();
+  }
+
+  /** Records one spoken message, transcribes it locally and sends it. */
+  async listen() {
+    if (this.mic.recording || this.transcribing) return;
+    this.open();
+    this.voice.stop();
+    this.micButton.classList.add("listening");
+    this.input.placeholder = "Listening…";
+    let recording;
+    try {
+      recording = await this.mic.record({
+        onLevel: (l) => (this.micButton.style.transform = `scale(${1 + l * 0.35})`),
+      });
+    } catch (err) {
+      this.say(`I can't hear you: ${(err as Error).message}. Check the microphone permission.`, 8000);
+      return;
+    } finally {
+      this.micButton.classList.remove("listening");
+      this.micButton.style.transform = "";
+      this.input.placeholder = `Talk to ${this.name}…`;
+    }
+    if (!recording.heardSpeech) {
+      this.say("I didn't hear anything.", 3000);
+      return;
+    }
+    this.transcribing = true;
+    this.micButton.classList.add("busy");
+    this.input.placeholder = "Transcribing…";
+    try {
+      const text = (await host.transcribe(recording.samples)).trim();
+      if (text) await this.send(text);
+      else this.say("Sorry, I didn't catch that.", 3000);
+    } catch (err) {
+      this.say(String(err), 8000);
+    } finally {
+      this.transcribing = false;
+      this.micButton.classList.remove("busy");
+      this.input.placeholder = `Talk to ${this.name}…`;
+    }
   }
 
   async send(text: string) {
