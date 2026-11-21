@@ -322,11 +322,25 @@ export class ChatUI {
     setLinkedText(this.bubbleText, text);
   }
 
-  /** Sits the bubble just above the character's head (overlapping the hair a little). */
-  private placeBubble() {
+  /** Vertical centre of the chat box in CSS px, when it has been moved (see toolbar.ts). */
+  barY: (() => number) | null = null;
+
+  /**
+   * Sits the bubble just above the character's head (overlapping the hair a little),
+   * moving it above or below the chat box if the chat box is in the way.
+   */
+  placeBubble() {
     const head = this.avatar.headTop();
     if (head === null) return;
-    const top = Math.max(8, head + 16 - this.bubble.offsetHeight);
+    const h = this.bubble.offsetHeight;
+    let top = Math.max(8, head + 16 - h);
+    if (this.isOpen && this.barY) {
+      const barTop = this.barY() - 22;
+      const barBottom = barTop + 44;
+      if (top < barBottom && top + h > barTop) {
+        top = barTop - 6 - h >= 8 ? barTop - 6 - h : barBottom + 6;
+      }
+    }
     this.bubble.style.top = `${Math.round(top)}px`;
   }
 

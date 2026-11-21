@@ -3,6 +3,7 @@ import { ChatUI } from "./chat";
 import { CrewUI } from "./crew";
 import { PosePicker } from "./picker";
 import * as host from "./host";
+import { Toolbar } from "./toolbar";
 import { EMOTIONS } from "./motions";
 import { BeepEngine, KokoroEngine, Voice } from "./voice";
 
@@ -36,6 +37,9 @@ const poses = new PosePicker(avatar, {
 });
 const chat = new ChatUI(avatar, voice);
 const crew = new CrewUI();
+const toolbar = new Toolbar(() => avatar.headTop());
+chat.barY = () => toolbar.y;
+toolbar.onMove = () => chat.placeBubble();
 chat.onModeChange = (brain) => crew.setEnabled(brain === "crew");
 (window as unknown as { crewUI: CrewUI }).crewUI = crew;
 kokoro.onStatus = (s) => chat.status(s);
@@ -95,6 +99,8 @@ async function load(source: host.ModelSource | null) {
     const summary = await avatar.load(source.url, source.look, source.params, files);
     await poses.restore(source.label);
     showStatus(null);
+    // "Above her head" depends on where her head ended up.
+    toolbar.apply();
     host.log("info", `[avatar] loaded ${source.label}: ${JSON.stringify(summary)}; look ${JSON.stringify(avatar.lookParams)}`);
     // A second later, once idle motions have started, record the mouth state.
     setTimeout(() => void avatar.diagnostics().then((d) => host.log("info", `[avatar] ${d}`)), 1500);
@@ -123,7 +129,8 @@ host.onCursor((x, y, inside) => {
     return;
   }
   const el = document.elementFromPoint(x / dpr, y / dpr);
-  const hit = !!el?.closest("[data-hit]") || avatar.hitTest(x, y);
+  // While the chat box is being dragged, keep the mouse even off the box.
+  const hit = !!el?.closest("[data-hit]") || !!document.querySelector("#chat.dragging") || avatar.hitTest(x, y);
   if (hit) {
     misses = 0;
     host.setClickThrough(false);

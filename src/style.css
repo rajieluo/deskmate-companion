@@ -214,15 +214,48 @@ body[data-brain="crew"] #chat input {
   position: fixed;
   left: 14px;
   right: 14px;
-  /* Vertically centred in the window, over her body. */
-  top: 50%;
+  /* Centred on --bar-y (toolbar.ts: above her head, her middle, her feet or dragged). */
+  top: var(--bar-y, 50%);
   transform: translateY(-50%);
   display: flex;
+  align-items: center;
   gap: 6px;
 }
 
 #api-key {
   transform: translateY(calc(-50% + 46px));
+}
+
+body[data-bar="lower"] #api-key {
+  transform: translateY(calc(-50% - 46px));
+}
+
+#toolbar-grip {
+  flex: none;
+  width: 14px;
+  height: 30px;
+  margin-right: -2px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.75);
+  color: #7c86b8;
+  box-shadow: 0 2px 8px rgba(20, 30, 70, 0.18);
+  cursor: grab;
+  display: grid;
+  place-items: center;
+  touch-action: none;
+}
+
+#toolbar-grip:hover,
+#chat.dragging #toolbar-grip {
+  background: rgba(255, 255, 255, 0.96);
+  color: #4b5bb0;
+}
+
+#chat.dragging,
+#chat.dragging #toolbar-grip {
+  cursor: grabbing;
 }
 
 #chat input,
@@ -306,13 +339,14 @@ body[data-brain="crew"] #chat input {
   color: white;
 }
 
-/* Poses & animations picker: sits above the chat box. */
+/* Poses & animations picker: opens above the chat box, or below it when the
+   chat box is in the top half of the window. */
 #poses {
   position: fixed;
   left: 10px;
   right: 10px;
-  bottom: calc(50% + 30px);
-  max-height: 42%;
+  bottom: calc(100% - var(--bar-y, 50%) + 30px);
+  max-height: min(42%, calc(var(--bar-y, 50%) - 40px));
   overflow-y: auto;
   padding: 8px 10px 10px;
   border-radius: 14px;
@@ -321,6 +355,12 @@ body[data-brain="crew"] #chat input {
   color: #1d2340;
   font-size: 13px;
   z-index: 5;
+}
+
+body[data-bar="upper"] #poses {
+  top: calc(var(--bar-y, 50%) + 30px);
+  bottom: auto;
+  max-height: min(42%, calc(100% - var(--bar-y, 50%) - 40px));
 }
 
 #poses h3 {
