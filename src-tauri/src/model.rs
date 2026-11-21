@@ -13,9 +13,20 @@ use tauri::http::{header, Response, StatusCode};
 /// Default model on the developer's machine: Aqua, under Documents\live2d models.
 const DEFAULT_MODEL: &[&str] = &["live2d models", "1014100aqua", "1014100.model3.json"];
 
-#[derive(Default, Serialize, Deserialize)]
-struct Settings {
-    model_path: Option<PathBuf>,
+/// Everything saved in `settings.json` in the app's config folder.
+/// Unknown or missing fields fall back to defaults, so the file can be hand-edited.
+#[derive(Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Settings {
+    pub model_path: Option<PathBuf>,
+    /// What the character calls itself. Default: "Aqua".
+    pub character_name: Option<String>,
+    /// Claude model id. Default: claude-opus-5-5.
+    pub chat_model: Option<String>,
+    /// low | medium | high | xhigh | max. Default: low (fast, cheap replies).
+    pub chat_effort: Option<String>,
+    /// Replaces the whole built-in persona prompt when set.
+    pub persona: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -30,7 +41,7 @@ pub struct ModelInfo {
 }
 
 struct Inner {
-    path: Option<PathBuf>,
+    settings: Settings,
     generation: u64,
 }
 
@@ -46,16 +57,21 @@ impl ModelStore {
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
-        let path = saved.model_path.filter(|p| p.is_file()).or_else(|| {
+        let mut settings = saved;
+        settings.model_path = settings.model_path.filter(|p| p.is_file()).or_else(|| {
             let default = DEFAULT_MODEL.iter().fold(documents?, |p, part| p.join(part));
             default.is_file().then_some(default)
         });
-        Self { settings_file, inner: Mutex::new(Inner { path, generation: 1 }) }
+        Self { settings_file, inner: Mutex::new(Inner { settings, generation: 1 }) }
+    }
+
+    pub fn settings(&self) -> Settings {
+        self.inner.lock().unwrap().settings.clone()
     }
 
     pub fn current(&self) -> Option<ModelInfo> {
         let inner = self.inner.lock().unwrap();
-        let path = inner.path.as_ref()?;
+        let path = inner.settings.model_path.as_ref()?;
         Some(ModelInfo {
             file_name: path.file_name()?.to_string_lossy().into_owned(),
             path: path.display().to_string(),
@@ -66,7 +82,7 @@ impl ModelStore {
     /// The folder holding the current model's .model3.json.
     pub fn current_dir(&self) -> Option<PathBuf> {
         let inner = self.inner.lock().unwrap();
-        inner.path.as_ref()?.parent().map(Path::to_path_buf)
+        inner.settings.model_path.as_ref()?.parent().map(Path::to_path_buf)
     }
 
     pub fn set(&self, path: &Path) -> Result<ModelInfo, String> {
@@ -82,15 +98,15 @@ impl ModelStore {
         }
         {
             let mut inner = self.inner.lock().unwrap();
-            inner.path = Some(path.to_path_buf());
+            inner.settings.model_path = Some(path.to_path_buf());
             inner.generation += 1;
         }
         self.save();
         Ok(self.current().expect("model just set"))
     }
 
-    fn save(&self) {
-        let settings = Settings { model_path: self.inner.lock().unwrap().path.clone() };
+    pub fn save(&self) {
+        let settings = self.settings();
         if let Some(dir) = self.settings_file.parent() {
             let _ = fs::create_dir_all(dir);
         }

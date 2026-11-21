@@ -6,12 +6,15 @@
 //! * a cursor poller that tells the page where the mouse is even while the window
 //!   ignores mouse events, so the page can turn click-through on and off by
 //!   hit-testing the character's pixels,
-//! * the tray menu (choose model, reset position, quit).
+//! * the tray menu (choose model, reset position, quit),
+//! * the Claude chat (see `chat.rs`), so the API key never reaches the page.
 
+mod chat;
 mod model;
 
 use std::{sync::Arc, thread, time::Duration};
 
+use chat::{Chat, ChatConfig};
 use model::{ModelInfo, ModelStore};
 use serde::Serialize;
 use tauri::{
@@ -20,6 +23,9 @@ use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, Runtime, State, WebviewWindow,
 };
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+
+const DEFAULT_NAME: &str = "Aqua";
 
 #[derive(Clone, Serialize, PartialEq)]
 struct CursorEvent {
@@ -32,6 +38,66 @@ struct CursorEvent {
 #[tauri::command]
 fn get_model(store: State<'_, Arc<ModelStore>>) -> Option<ModelInfo> {
     store.current()
+}
+
+#[derive(Serialize)]
+struct ChatStatus {
+    has_key: bool,
+    name: String,
+    model: String,
+}
+
+#[tauri::command]
+fn chat_status(store: State<'_, Arc<ModelStore>>) -> ChatStatus {
+    let s = store.settings();
+    ChatStatus {
+        has_key: chat::get_api_key().is_some(),
+        name: s.character_name.unwrap_or_else(|| DEFAULT_NAME.into()),
+        model: s.chat_model.unwrap_or_else(|| chat::DEFAULT_MODEL.into()),
+    }
+}
+
+#[tauri::command]
+fn set_api_key(key: String) -> Result<(), String> {
+    chat::set_api_key(&key)
+}
+
+#[tauri::command]
+async fn chat_send<R: Runtime>(
+    app: AppHandle<R>,
+    chat: State<'_, Arc<Chat>>,
+    store: State<'_, Arc<ModelStore>>,
+    text: String,
+) -> Result<u64, String> {
+    let s = store.settings();
+    let name = s.character_name.unwrap_or_else(|| DEFAULT_NAME.into());
+    let config = ChatConfig {
+        model: s.chat_model.unwrap_or_else(|| chat::DEFAULT_MODEL.into()),
+        effort: s.chat_effort.unwrap_or_else(|| chat::DEFAULT_EFFORT.into()),
+        persona: s.persona.unwrap_or_else(|| chat::default_persona(&name)),
+    };
+    let chat = chat.inner().clone();
+    Ok(chat.send(&app, text, config).await)
+}
+
+#[tauri::command]
+fn chat_cancel(chat: State<'_, Arc<Chat>>) {
+    chat.cancel();
+}
+
+#[tauri::command]
+fn chat_reset(chat: State<'_, Arc<Chat>>) {
+    chat.reset();
+}
+
+/// Brings the window forward and opens the chat box.
+fn open_chat<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.set_ignore_cursor_events(false);
+        let _ = w.set_focus();
+        let _ = w.emit_to(w.label(), "open-chat", ());
+    }
 }
 
 #[tauri::command]
@@ -95,10 +161,15 @@ fn spawn_cursor_poller<R: Runtime>(window: WebviewWindow<R>) {
 fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let choose = MenuItem::with_id(app, "choose", "Choose model…", true, None::<&str>)?;
     let reset = MenuItem::with_id(app, "reset", "Reset position", true, None::<&str>)?;
+    let talk = MenuItem::with_id(app, "talk", "Talk (Ctrl+Shift+Space)", true, None::<&str>)?;
+    let forget = MenuItem::with_id(app, "forget", "Forget conversation", true, None::<&str>)?;
+    let key = MenuItem::with_id(app, "key", "Set API key…", true, None::<&str>)?;
     let reload = MenuItem::with_id(app, "reload", "Reload", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&choose, &reset, &reload, &sep, &quit])?;
+    let sep2 = PredefinedMenuItem::separator(app)?;
+    let menu =
+        Menu::with_items(app, &[&talk, &forget, &key, &sep, &choose, &reset, &reload, &sep2, &quit])?;
 
     let mut tray = TrayIconBuilder::with_id("main")
         .tooltip("Desktop Assistant")
@@ -112,6 +183,15 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                         let _ = app.emit("model-error", e);
                     }
                 });
+            }
+            "talk" => open_chat(app),
+            "forget" => {
+                app.state::<Arc<Chat>>().reset();
+                let _ = app.emit("chat-reset", ());
+            }
+            "key" => {
+                open_chat(app);
+                let _ = app.emit("open-api-key", ());
             }
             "reset" => {
                 if let Some(w) = app.get_webview_window("main") {
@@ -138,6 +218,15 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == ShortcutState::Pressed {
+                        open_chat(app);
+                    }
+                })
+                .build(),
+        )
         .register_asynchronous_uri_scheme_protocol("model", |ctx, request, responder| {
             let store = ctx.app_handle().state::<Arc<ModelStore>>().inner().clone();
             thread::spawn(move || responder.respond(store.serve(request.uri().path())));
@@ -147,7 +236,15 @@ pub fn run() {
             let first_run = !config_dir.join("settings.json").exists();
             let documents = app.path().document_dir().ok();
             let store = Arc::new(ModelStore::load(config_dir, documents));
+            // Saving now also marks later launches as "not first run".
+            store.save();
             app.manage(store);
+            app.manage(Arc::new(Chat::default()));
+
+            let talk = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
+            if let Err(e) = app.global_shortcut().register(talk) {
+                eprintln!("could not register Ctrl+Shift+Space: {e}");
+            }
 
             build_tray(app.handle())?;
 
@@ -159,7 +256,15 @@ pub fn run() {
             spawn_cursor_poller(window);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_model, pick_model])
+        .invoke_handler(tauri::generate_handler![
+            get_model,
+            pick_model,
+            chat_status,
+            set_api_key,
+            chat_send,
+            chat_cancel,
+            chat_reset
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Desktop Assistant");
 }
