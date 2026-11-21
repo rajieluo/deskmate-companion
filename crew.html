@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Crew</title>
+    <link rel="stylesheet" href="/src/crew-window.css" />
+  </head>
+  <body>
+    <header>
+      <div id="mate" class="mate"></div>
+      <input id="search" type="search" placeholder="Search tasks…" autocomplete="off" />
+      <button id="refresh" type="button">Refresh</button>
+      <button id="terminal" type="button" title="Opens Herdr, where each crewmate has its own pane">Open crew terminal</button>
+    </header>
+    <div id="notice" class="notice" hidden></div>
+    <div class="panes">
+      <nav id="list" aria-label="Crew tasks"></nav>
+      <main id="detail" aria-live="polite"></main>
+    </div>
+    <script type="module" src="/src/crew-window.ts"></script>
+  </body>
+</html>

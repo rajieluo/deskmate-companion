@@ -228,6 +228,166 @@ pub struct ClaudeCode {
     turn: AtomicU64,
     /// Sessions started from the avatar during this app run.
     ours: Mutex<std::collections::HashSet<String>>,
+    /// The slash commands Claude Code last reported, for the folder it ran in.
+    commands: Mutex<Option<CommandCache>>,
+}
+
+/// One entry in the chat box's "/" menu.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SlashCommand {
+    pub name: String,
+    pub description: String,
+    /// Handled by the app itself (e.g. /clear) rather than sent to Claude Code.
+    pub app: bool,
+}
+
+#[derive(Clone)]
+struct CommandCache {
+    folder: PathBuf,
+    names: Vec<String>,
+    plugins: Vec<(String, PathBuf)>,
+}
+
+/// Commands the app handles itself; they never reach Claude Code.
+pub const APP_COMMANDS: [(&str, &str); 3] = [
+    ("clear", "Start a fresh session (forget this conversation)"),
+    ("new", "Start a fresh session (same as /clear)"),
+    ("folder", "Pick the folder Claude Code works in"),
+];
+
+/// Short descriptions for built-in commands, which have no file to read one from.
+const BUILTIN_DESCRIPTIONS: [(&str, &str); 14] = [
+    ("compact", "Summarize the conversation so far to free up context"),
+    ("context", "Show how full the context window is"),
+    ("init", "Write a CLAUDE.md describing this project"),
+    ("review", "Review a pull request"),
+    ("security-review", "Security review of the pending changes"),
+    ("code-review", "Review the current changes for bugs"),
+    ("simplify", "Clean up the changed code"),
+    ("usage", "Show plan usage limits"),
+    ("cost", "Show what this session has cost"),
+    ("model", "Show or change the model"),
+    ("effort", "Show or change the reasoning effort"),
+    ("recap", "Recap what this session has done"),
+    ("insights", "Report on how you've been using Claude Code"),
+    ("debug", "Help debug a problem in this session"),
+];
+
+/// Reads the `description:` field from a Markdown file's YAML front matter (single-line,
+/// quoted, or a folded `>` / `|` block), shortened to fit a menu row.
+pub fn frontmatter_description(text: &str) -> Option<String> {
+    let mut lines = text.lines();
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+    let mut desc: Option<String> = None;
+    let mut folding = false;
+    for line in lines {
+        if line.trim() == "---" {
+            break;
+        }
+        if folding {
+            if line.starts_with(' ') || line.starts_with('\t') {
+                let d = desc.get_or_insert_with(String::new);
+                if !d.is_empty() {
+                    d.push(' ');
+                }
+                d.push_str(line.trim());
+                continue;
+            }
+            folding = false;
+        }
+        if let Some(v) = line.strip_prefix("description:") {
+            let v = v.trim();
+            if v.is_empty() || v.starts_with('>') || v.starts_with('|') {
+                desc = Some(String::new());
+                folding = true;
+            } else {
+                let unquoted = v
+                    .strip_prefix('"')
+                    .and_then(|s| s.strip_suffix('"'))
+                    .or_else(|| v.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
+                    .unwrap_or(v);
+                desc = Some(unquoted.to_string());
+            }
+        }
+    }
+    desc.map(|d| shorten(&d)).filter(|d| !d.is_empty())
+}
+
+/// The first sentence, at most about 90 characters.
+fn shorten(text: &str) -> String {
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let first = match text.find(". ") {
+        Some(i) => &text[..=i],
+        None => text.as_str(),
+    };
+    if first.chars().count() > 90 {
+        format!("{}…", first.chars().take(89).collect::<String>().trim_end())
+    } else {
+        first.to_string()
+    }
+}
+
+/// Descriptions for skills and custom commands, from their files: the user's (~/.claude),
+/// the project's (<folder>/.claude) and each plugin's. Plugin entries are named "plugin:name".
+pub fn command_descriptions(home: Option<&Path>, folder: &Path, plugins: &[(String, PathBuf)]) -> std::collections::HashMap<String, String> {
+    let mut roots: Vec<(String, PathBuf)> = vec![];
+    if let Some(h) = home {
+        roots.push((String::new(), h.join(".claude")));
+    }
+    roots.push((String::new(), folder.join(".claude")));
+    for (name, path) in plugins {
+        roots.push((format!("{name}:"), path.clone()));
+    }
+    let mut out = std::collections::HashMap::new();
+    for (prefix, root) in roots {
+        if let Ok(entries) = std::fs::read_dir(root.join("skills")) {
+            for e in entries.flatten() {
+                let skill = e.path().join("SKILL.md");
+                if let Some(d) = std::fs::read_to_string(&skill).ok().and_then(|t| frontmatter_description(&t)) {
+                    out.entry(format!("{prefix}{}", e.file_name().to_string_lossy())).or_insert(d);
+                }
+            }
+        }
+        collect_command_files(&root.join("commands"), &prefix, &mut out);
+    }
+    out
+}
+
+/// commands/foo.md is /foo; commands/git/push.md is /git:push.
+fn collect_command_files(dir: &Path, prefix: &str, out: &mut std::collections::HashMap<String, String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for e in entries.flatten() {
+        let path = e.path();
+        let name = e.file_name().to_string_lossy().into_owned();
+        if path.is_dir() {
+            collect_command_files(&path, &format!("{prefix}{name}:"), out);
+        } else if let Some(stem) = name.strip_suffix(".md") {
+            let d = std::fs::read_to_string(&path).ok().and_then(|t| frontmatter_description(&t)).unwrap_or_default();
+            out.entry(format!("{prefix}{stem}")).or_insert(d);
+        }
+    }
+}
+
+/// The menu: the app's own commands, then what Claude Code reported, with descriptions where known.
+pub fn build_menu(names: &[String], descriptions: &std::collections::HashMap<String, String>) -> Vec<SlashCommand> {
+    let mut menu: Vec<SlashCommand> = APP_COMMANDS
+        .iter()
+        .map(|(n, d)| SlashCommand { name: n.to_string(), description: d.to_string(), app: true })
+        .collect();
+    for name in names {
+        if name.starts_with("__") || APP_COMMANDS.iter().any(|(n, _)| n == name) || menu.iter().any(|c| &c.name == name) {
+            continue;
+        }
+        let description = descriptions
+            .get(name)
+            .cloned()
+            .or_else(|| BUILTIN_DESCRIPTIONS.iter().find(|(n, _)| n == name).map(|(_, d)| d.to_string()))
+            .unwrap_or_default();
+        menu.push(SlashCommand { name: name.clone(), description, app: false });
+    }
+    menu
 }
 
 pub struct RunConfig {
@@ -326,6 +486,23 @@ impl ClaudeCode {
                 error,
             },
         );
+    }
+
+    /// The "/" menu for `folder`. Uses the list from the last message sent there; otherwise
+    /// asks Claude Code once with a local command (no model call, no saved session).
+    pub async fn commands(&self, folder: &Path) -> Result<Vec<SlashCommand>, String> {
+        let cached = self.commands.lock().unwrap().clone().filter(|c| c.folder == folder);
+        let cache = match cached {
+            Some(c) => c,
+            None => {
+                let c = probe_commands(folder).await?;
+                *self.commands.lock().unwrap() = Some(c.clone());
+                c
+            }
+        };
+        let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from);
+        let descriptions = command_descriptions(home.as_deref(), folder, &cache.plugins);
+        Ok(build_menu(&cache.names, &descriptions))
     }
 
     fn write_sessions_list(&self, dir: &Path, file: &Path) {
@@ -434,6 +611,10 @@ impl ClaudeCode {
             let _ = app.emit("chat-delta", Delta { turn, text: rest });
         }
         let status = child.wait().await.ok();
+        if let Some(names) = parser.commands.take() {
+            *self.commands.lock().unwrap() =
+                Some(CommandCache { folder: config.folder.clone(), names, plugins: std::mem::take(&mut parser.plugins) });
+        }
         if let Some(id) = parser.session_id.clone() {
             self.ours.lock().unwrap().insert(id.clone());
             *self.session.lock().unwrap() = Some(id);
@@ -471,6 +652,48 @@ impl ClaudeCode {
     }
 }
 
+/// Starts Claude Code just long enough to read its init event. `/context` is a local command,
+/// so even if it ran it would cost nothing; the process is killed once the list arrives.
+async fn probe_commands(folder: &Path) -> Result<CommandCache, String> {
+    if !folder.is_dir() {
+        return Err("Pick a folder for Claude Code to work in first.".into());
+    }
+    let claude = find_claude().ok_or("I can't find Claude Code.")?;
+    let mut cmd = tokio::process::Command::new(&claude);
+    cmd.current_dir(folder)
+        .args(["-p", "--no-session-persistence", "--output-format", "stream-json", "--verbose"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    #[cfg(windows)]
+    {
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let mut child = cmd.spawn().map_err(|e| format!("Couldn't start Claude Code: {e}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(b"/context").await;
+    }
+    let mut lines = BufReader::new(child.stdout.take().expect("piped stdout")).lines();
+    let mut parser = StreamParser::default();
+    let found = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        while let Ok(Some(line)) = lines.next_line().await {
+            parser.feed(&line);
+            if parser.commands.is_some() {
+                return true;
+            }
+        }
+        false
+    })
+    .await
+    .unwrap_or(false);
+    let _ = child.kill().await;
+    match parser.commands {
+        Some(names) if found => Ok(CommandCache { folder: folder.to_path_buf(), names, plugins: parser.plugins }),
+        _ => Err("Claude Code didn't list its commands.".into()),
+    }
+}
+
 pub enum Out {
     Text(String),
     Activity(String),
@@ -481,6 +704,10 @@ pub enum Out {
 pub struct StreamParser {
     pub session_id: Option<String>,
     pub model: Option<String>,
+    /// Slash commands from the init event, minus the terminal-only ones.
+    pub commands: Option<Vec<String>>,
+    /// (name, folder) of each installed plugin, from the init event.
+    pub plugins: Vec<(String, PathBuf)>,
     pub result: Option<Result<(), String>>,
     /// Text already streamed for the current assistant message (from partial events).
     streamed_partial: bool,
@@ -500,6 +727,21 @@ impl StreamParser {
                 }
                 if let Some(m) = v["model"].as_str() {
                     self.model = Some(m.to_string());
+                }
+                if let Some(list) = v["slash_commands"].as_array() {
+                    let terminal: Vec<&str> =
+                        v["terminal_slash_commands"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+                    self.commands = Some(
+                        list.iter().filter_map(Value::as_str).filter(|n| !terminal.contains(n)).map(str::to_string).collect(),
+                    );
+                    self.plugins = v["plugins"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|p| Some((p["name"].as_str()?.to_string(), p["path"].as_str()?)))
+                        .filter(|(_, path)| *path != "builtin")
+                        .map(|(n, path)| (n, PathBuf::from(path)))
+                        .collect();
                 }
             }
             "stream_event" => {
@@ -716,6 +958,52 @@ mod tests {
         std::fs::create_dir_all(&sub).unwrap();
         assert_eq!(handoff_folder(&here, Some("handoff-folder-test")), sub);
         assert_eq!(handoff_folder(&here, Some(sub.to_str().unwrap())), sub);
+    }
+
+    #[test]
+    fn reads_slash_commands_from_init() {
+        let mut p = StreamParser::default();
+        p.feed(
+            r#"{"type":"system","subtype":"init","session_id":"s1","slash_commands":["tft","clear","color","__x","anthropic-skills:pdf"],"terminal_slash_commands":["color"],"plugins":[{"name":"voltagent-lang","path":"C:\\p\\vl"},{"name":"telemetry","path":"builtin"}]}"#,
+        );
+        assert_eq!(p.commands.as_deref(), Some(&["tft".to_string(), "clear".into(), "__x".into(), "anthropic-skills:pdf".into()][..]));
+        assert_eq!(p.plugins, vec![("voltagent-lang".to_string(), PathBuf::from("C:\\p\\vl"))]);
+        let mut d = std::collections::HashMap::new();
+        d.insert("tft".to_string(), "TFT coach".to_string());
+        let menu = build_menu(p.commands.as_deref().unwrap(), &d);
+        let names: Vec<&str> = menu.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["clear", "new", "folder", "tft", "anthropic-skills:pdf"]);
+        assert!(menu[0].app && !menu[3].app);
+        assert_eq!(menu[3].description, "TFT coach");
+    }
+
+    #[test]
+    fn reads_front_matter_descriptions() {
+        assert_eq!(frontmatter_description("---\nname: a\ndescription: Does a thing. And more.\n---\nbody"), Some("Does a thing.".into()));
+        assert_eq!(frontmatter_description("---\ndescription: \"Quoted\"\n---"), Some("Quoted".into()));
+        assert_eq!(frontmatter_description("---\ndescription: >\n  Folded over\n  two lines\nname: x\n---"), Some("Folded over two lines".into()));
+        assert_eq!(frontmatter_description("no front matter"), None);
+        let long = format!("---\ndescription: {}\n---", "word ".repeat(40));
+        assert!(frontmatter_description(&long).unwrap().chars().count() <= 90);
+    }
+
+    #[test]
+    fn finds_skill_and_command_files() {
+        let root = std::env::temp_dir().join("slash-desc-test");
+        let _ = std::fs::remove_dir_all(&root);
+        let home = root.join("home");
+        let project = root.join("project");
+        let plugin = root.join("plugin");
+        std::fs::create_dir_all(home.join(".claude/skills/tft")).unwrap();
+        std::fs::write(home.join(".claude/skills/tft/SKILL.md"), "---\nname: tft\ndescription: TFT coach.\n---").unwrap();
+        std::fs::create_dir_all(project.join(".claude/commands/git")).unwrap();
+        std::fs::write(project.join(".claude/commands/git/push.md"), "---\ndescription: Push it\n---").unwrap();
+        std::fs::create_dir_all(plugin.join("skills/lint")).unwrap();
+        std::fs::write(plugin.join("skills/lint/SKILL.md"), "---\ndescription: Lint\n---").unwrap();
+        let d = command_descriptions(Some(&home), &project, &[("pl".into(), plugin)]);
+        assert_eq!(d.get("tft").map(String::as_str), Some("TFT coach."));
+        assert_eq!(d.get("git:push").map(String::as_str), Some("Push it"));
+        assert_eq!(d.get("pl:lint").map(String::as_str), Some("Lint"));
     }
 
     #[test]

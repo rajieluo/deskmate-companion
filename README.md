@@ -80,7 +80,7 @@ Permissions: there is no one to click "Allow" in this mode, so it runs with `acc
 
 ## Crew mode (firstmate)
 
-Crew mode makes her the face of [firstmate](https://github.com/kunchenguid/firstmate), which runs several Claude Code sessions in parallel, each in its own git worktree. You talk to her; she passes it to firstmate's first mate, reads out its answers, and shows a badge for each task (blue working, amber needs you, green PR ready, red failed). Firstmate runs in WSL2. Setup and details: [docs/crew-setup.md](docs/crew-setup.md).
+Crew mode makes her the face of [firstmate](https://github.com/kunchenguid/firstmate), which runs several Claude Code sessions in parallel, each in its own git worktree. You talk to her; she passes it to firstmate's first mate, reads out its answers, and shows a badge for each task (blue working, amber needs you, green PR ready, red failed). *Crew sessions…* in the tray opens a window listing every crewmate with its status and timeline. Firstmate runs in WSL2. Setup and details: [docs/crew-setup.md](docs/crew-setup.md).
 
 ### Announcements from the first mate
 

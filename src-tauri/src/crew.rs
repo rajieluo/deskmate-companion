@@ -14,7 +14,7 @@
 //! command-line quoting. Message text goes in on stdin.
 
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashSet, VecDeque},
     path::{Path, PathBuf},
     process::Stdio,
     sync::{
@@ -459,6 +459,45 @@ pub struct Task {
     pub text: String,
     pub pr: Option<String>,
     pub updated: i64,
+    /// Agent tool and model the worker was launched with (from its dispatch record).
+    pub harness: Option<String>,
+    pub model: Option<String>,
+    /// When it was dispatched (or first seen).
+    pub started: i64,
+    /// When it was cleaned up, for finished tasks.
+    pub ended: Option<i64>,
+    /// What happened to it, oldest first, for the Crew window (the latest MAX_EVENTS).
+    pub events: Vec<TaskEvent>,
+}
+
+/// One line in a task's timeline.
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct TaskEvent {
+    pub ts: i64,
+    /// dispatched, status, pr-ready, merged or cleaned-up.
+    pub kind: String,
+    /// The status line's state word, for status events.
+    pub state: Option<String>,
+    pub text: String,
+}
+
+/// Timeline entries kept per task.
+pub const MAX_EVENTS: usize = 60;
+/// Cleaned-up tasks kept for the Crew window's Finished list.
+pub const MAX_FINISHED: usize = 30;
+
+impl Task {
+    fn log(&mut self, ts: i64, kind: &str, state: Option<String>, text: String) {
+        let event = TaskEvent { ts, kind: kind.into(), state, text };
+        // The ledger can repeat records after an interrupted capture.
+        if self.events.iter().rev().take(8).any(|e| *e == event) {
+            return;
+        }
+        self.events.push(event);
+        if self.events.len() > MAX_EVENTS {
+            self.events.drain(..self.events.len() - MAX_EVENTS);
+        }
+    }
 }
 
 /// Something worth saying out loud.
@@ -487,6 +526,12 @@ struct Record {
     text: Option<String>,
     #[serde(default)]
     pr: Option<String>,
+    #[serde(default)]
+    harness: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    via: Option<String>,
 }
 
 fn short(text: &str, max: usize) -> String {
@@ -505,6 +550,11 @@ fn spoken_name(task: &str) -> String {
 
 /// Applies one ledger line. Returns what to announce, if anything.
 pub fn apply(tasks: &mut BTreeMap<String, Task>, line: &str) -> Option<Attention> {
+    apply_tracked(tasks, &mut VecDeque::new(), line)
+}
+
+/// Like `apply`, and moves cleaned-up tasks to the front of `finished`.
+pub fn apply_tracked(tasks: &mut BTreeMap<String, Task>, finished: &mut VecDeque<Task>, line: &str) -> Option<Attention> {
     let rec: Record = serde_json::from_str(line).ok()?;
     if rec.task.is_empty() {
         return None;
@@ -521,6 +571,11 @@ pub fn apply(tasks: &mut BTreeMap<String, Task>, line: &str) -> Option<Attention
                 text: String::new(),
                 pr: None,
                 updated: rec.ts,
+                harness: None,
+                model: None,
+                started: rec.ts,
+                ended: None,
+                events: Vec::new(),
             })
             .updated = rec.ts;
     };
@@ -530,7 +585,12 @@ pub fn apply(tasks: &mut BTreeMap<String, Task>, line: &str) -> Option<Attention
             let t = tasks.get_mut(&rec.task)?;
             t.kind = rec.kind.clone();
             t.project = rec.project.clone();
+            t.harness = rec.harness.clone();
+            t.model = rec.model.clone();
             t.state = "working".into();
+            t.started = rec.ts;
+            let what = [rec.kind.as_deref(), rec.project.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" in ");
+            t.log(rec.ts, "dispatched", None, if what.is_empty() { "Started".into() } else { format!("Started ({what})") });
             None
         }
         "task.status" => {
@@ -544,6 +604,7 @@ pub fn apply(tasks: &mut BTreeMap<String, Task>, line: &str) -> Option<Attention
             if let Some(state) = &state {
                 t.state = state.clone();
             }
+            t.log(rec.ts, "status", state.clone(), text.clone());
             let line = short(&text, 160);
             match state.as_deref() {
                 Some("needs-decision") | Some("blocked") => Some(Attention {
@@ -573,6 +634,7 @@ pub fn apply(tasks: &mut BTreeMap<String, Task>, line: &str) -> Option<Attention
             let t = tasks.get_mut(&rec.task)?;
             t.state = "pr-ready".into();
             t.pr = rec.pr.clone();
+            t.log(rec.ts, "pr-ready", None, rec.pr.clone().unwrap_or_default());
             Some(Attention {
                 task: rec.task.clone(),
                 kind: "pr-ready".into(),
@@ -586,10 +648,19 @@ pub fn apply(tasks: &mut BTreeMap<String, Task>, line: &str) -> Option<Attention
             if rec.pr.is_some() {
                 t.pr = rec.pr.clone();
             }
+            let how = if rec.via.as_deref() == Some("local") { "Landed locally".to_string() } else { rec.pr.clone().unwrap_or_default() };
+            t.log(rec.ts, "merged", None, how);
             Some(Attention { task: rec.task.clone(), kind: "merged".into(), speech: format!("[proud] {name} is merged.") })
         }
         "task.cleaned_up" => {
-            tasks.remove(&rec.task);
+            if let Some(mut t) = tasks.remove(&rec.task) {
+                t.ended = Some(rec.ts);
+                t.updated = rec.ts;
+                t.log(rec.ts, "cleaned-up", None, "Worker and its copy removed".into());
+                finished.retain(|f| f.id != t.id);
+                finished.push_front(t);
+                finished.truncate(MAX_FINISHED);
+            }
             None
         }
         _ => None,
@@ -663,6 +734,11 @@ struct PollState {
     primed: bool,
     replies_primed: bool,
     tasks: BTreeMap<String, Task>,
+    /// Cleaned-up tasks, newest first.
+    finished: VecDeque<Task>,
+    /// Unix time of the last successful poll, and the last poll error.
+    polled: Option<i64>,
+    error: Option<String>,
     /// Notes this app sent, so their replies are always read out.
     sent: HashSet<String>,
     /// The name and persona the last note carried in full.
@@ -681,6 +757,17 @@ impl Crew {
         let mut list: Vec<Task> = self.state.lock().unwrap().tasks.values().cloned().collect();
         list.sort_by_key(|t| std::cmp::Reverse(t.updated));
         list
+    }
+
+    /// Tasks that were cleaned up while the app watched (or in the ledger), newest first.
+    pub fn finished(&self) -> Vec<Task> {
+        self.state.lock().unwrap().finished.iter().cloned().collect()
+    }
+
+    /// When the crew was last read, and what went wrong last time, if it did.
+    pub fn poll_status(&self) -> (Option<i64>, Option<String>) {
+        let s = self.state.lock().unwrap();
+        (s.polled, s.error.clone())
     }
 
     /// Queues a message for the first mate. Returns what she says right away.
@@ -785,13 +872,15 @@ impl Crew {
                 // The ledger was replaced; start over.
                 s.offset = 0;
                 s.tasks.clear();
+                s.finished.clear();
                 changed = true;
             } else {
                 // Only whole lines; a half-written last line waits for the next poll.
                 let complete = bytes.rfind('\n').map(|i| &bytes[..=i]).unwrap_or("");
                 let primed = s.primed;
+                let PollState { tasks, finished, .. } = &mut *s;
                 for line in complete.lines() {
-                    if let Some(a) = apply(&mut s.tasks, line) {
+                    if let Some(a) = apply_tracked(tasks, finished, line) {
                         if primed {
                             said.push(a);
                         }
@@ -831,7 +920,18 @@ impl Crew {
                 if !on {
                     break;
                 }
-                match crew.poll(&app).await {
+                let result = crew.poll(&app).await;
+                {
+                    let mut s = crew.state.lock().unwrap();
+                    match &result {
+                        Ok(()) => {
+                            s.polled = Some(now_secs());
+                            s.error = None;
+                        }
+                        Err(e) => s.error = Some(e.clone()),
+                    }
+                }
+                match result {
                     Ok(()) => last_error.clear(),
                     Err(e) => {
                         if e != last_error {
@@ -871,6 +971,11 @@ impl Crew {
 }
 
 /// A unique id for `note --request-id`, so a retried send never queues twice.
+fn now_secs() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+}
+
 fn request_id() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
@@ -911,6 +1016,33 @@ mod tests {
         assert_eq!(apply(&mut tasks, lines[5]).unwrap().kind, "merged");
         assert_eq!(apply(&mut tasks, lines[6]), None);
         assert!(tasks.is_empty());
+    }
+
+    #[test]
+    fn keeps_a_timeline_and_finished_tasks() {
+        let mut tasks = BTreeMap::new();
+        let mut finished = VecDeque::new();
+        let lines: Vec<&str> = LEDGER.lines().collect();
+        for line in &lines[..5] {
+            apply_tracked(&mut tasks, &mut finished, line);
+        }
+        // A repeated record (interrupted capture) is not logged twice.
+        apply_tracked(&mut tasks, &mut finished, lines[3]);
+        let t = &tasks["fix-login"];
+        assert_eq!(t.harness.as_deref(), Some("claude"));
+        assert_eq!(t.started, 1790132857);
+        let kinds: Vec<&str> = t.events.iter().map(|e| e.kind.as_str()).collect();
+        assert_eq!(kinds, ["dispatched", "status", "status", "status", "pr-ready"]);
+        assert_eq!(t.events[0].text, "Started (ship in webapp)");
+        assert_eq!(t.events[2].state.as_deref(), Some("needs-decision"));
+        for line in &lines[5..] {
+            apply_tracked(&mut tasks, &mut finished, line);
+        }
+        assert!(tasks.is_empty());
+        assert_eq!(finished.len(), 1);
+        let f = &finished[0];
+        assert_eq!((f.state.as_str(), f.ended), ("merged", Some(1790133960)));
+        assert_eq!(f.events.last().unwrap().kind, "cleaned-up");
     }
 
     #[test]

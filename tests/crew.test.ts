@@ -29,3 +29,35 @@ describe("crew badges", () => {
     );
   });
 });
+
+describe("crew window", () => {
+  it("groups tasks most urgent first and leaves out empty sections", async () => {
+    const { groupTasks } = await import("../src/crew-status");
+    const a = { ...task("a", "working"), updated: 1 };
+    const b = { ...task("b", "working"), updated: 5 };
+    const groups = groupTasks([a, task("c", "blocked"), b]);
+    expect(groups.map((g) => g.title)).toEqual(["Needs you", "Working"]);
+    expect(groups[1].tasks.map((t) => t.id)).toEqual(["b", "a"]);
+  });
+
+  it("says how long ago, and what the first mate is doing", async () => {
+    const { ago, mateLabel } = await import("../src/crew-status");
+    expect(ago(null)).toBe("");
+    expect(ago(1000, 1010)).toBe("just now");
+    expect(ago(1000, 1000 + 5 * 60)).toBe("5 min ago");
+    expect(ago(1000, 1000 + 3 * 3600)).toBe("3 h ago");
+    expect(ago(1000, 1000 + 48 * 3600)).toBe("2 days ago");
+    expect(mateLabel("idle")).toBe("on watch");
+    expect(mateLabel("stopped")).toBe("not running");
+  });
+
+  it("searches names, projects and the timeline", async () => {
+    const { matches } = await import("../src/crew-status");
+    const t = { ...task("fix-login", "working"), events: [{ ts: 1, kind: "status", state: "working", text: "flaky test found" }] };
+    expect(matches(t, "")).toBe(true);
+    expect(matches(t, "fix log")).toBe(true);
+    expect(matches(t, "APP")).toBe(true);
+    expect(matches(t, "flaky")).toBe(true);
+    expect(matches(t, "billing")).toBe(false);
+  });
+});

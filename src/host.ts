@@ -234,6 +234,24 @@ export async function chatSend(text: string): Promise<number> {
   return turn;
 }
 
+/** Forgets the conversation: the next message starts a fresh session. */
+export async function chatReset() {
+  if (inTauri) await invoke("chat_reset");
+}
+
+/** Claude Code's slash commands for the current folder, for the "/" menu. */
+export async function codeCommands(): Promise<{ name: string; description: string; app: boolean }[]> {
+  if (!inTauri) {
+    return [
+      { name: "clear", description: "Start a fresh session (forget this conversation)", app: true },
+      { name: "folder", description: "Pick the folder Claude Code works in", app: true },
+      { name: "tft", description: "Teamfight Tactics coach", app: false },
+      { name: "code-review", description: "Review the current changes for bugs", app: false },
+    ];
+  }
+  return invoke("code_commands");
+}
+
 export async function chatCancel() {
   if (inTauri) await invoke("chat_cancel");
   else browserTurn++;
@@ -330,6 +348,43 @@ export interface CrewTask {
   text: string;
   pr: string | null;
   updated: number;
+  harness?: string | null;
+  model?: string | null;
+  started?: number;
+  /** Set for finished (cleaned-up) tasks. */
+  ended?: number | null;
+  events?: CrewEvent[];
+}
+
+/** One line in a task's timeline. */
+export interface CrewEvent {
+  ts: number;
+  /** dispatched, status, pr-ready, merged, cleaned-up */
+  kind: string;
+  state: string | null;
+  text: string;
+}
+
+/** Everything the Crew window shows (see crew_fleet in src-tauri/src/lib.rs). */
+export interface CrewFleet {
+  on: boolean;
+  direct: boolean;
+  home: string;
+  /** stopped, starting, busy, idle, or separate (notes mode) */
+  mate: string;
+  session: string | null;
+  polled: number | null;
+  error: string | null;
+  tasks: CrewTask[];
+  finished: CrewTask[];
+}
+
+export async function crewFleet(): Promise<CrewFleet | null> {
+  return inTauri ? invoke<CrewFleet>("crew_fleet") : null;
+}
+
+export function crewWindowOpen() {
+  if (inTauri) void invoke("crew_window_open");
 }
 
 export interface CrewAttention {

@@ -1,11 +1,10 @@
 name: CI
 
-# Fast checks only. The Windows installer build lives in installer.yml and runs
-# by hand, because Windows runners use GitHub Actions minutes twice as fast.
+# Fast checks only. The Windows installer build lives in installer.yml.
+# Runs only when started by hand (Actions tab > CI > Run workflow): Actions
+# minutes are limited, so changes are checked with local builds instead.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}

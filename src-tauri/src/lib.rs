@@ -408,6 +408,17 @@ fn chat_reset(chat: State<'_, Arc<Chat>>, code: State<'_, Arc<ClaudeCode>>) {
     code.reset();
 }
 
+/// The chat box's "/" menu in Claude Code mode.
+#[tauri::command]
+async fn code_commands(
+    store: State<'_, Arc<ModelStore>>,
+    code: State<'_, Arc<ClaudeCode>>,
+) -> Result<Vec<claude_code::SlashCommand>, String> {
+    let folder = store.settings().claude_code_folder.ok_or("Pick a folder for Claude Code to work in first.")?;
+    let code = code.inner().clone();
+    code.commands(&folder).await
+}
+
 /// Lets the user pick the folder Claude Code works in, and switches to Claude Code mode.
 #[tauri::command]
 async fn pick_claude_code_folder<R: Runtime>(app: AppHandle<R>) -> Result<Option<String>, String> {
@@ -459,6 +470,70 @@ fn sync_brain_menu<R: Runtime>(app: &AppHandle<R>, brain: &str) {
 #[tauri::command]
 fn crew_tasks(crew: State<'_, Arc<Crew>>) -> Vec<crew::Task> {
     crew.tasks()
+}
+
+/// Everything the Crew window shows.
+#[derive(serde::Serialize)]
+struct Fleet {
+    /// Crew mode is on (the crew is only read while it is).
+    on: bool,
+    /// She is the first mate (false: notes go to a separate first mate).
+    direct: bool,
+    home: String,
+    /// The first mate session: stopped, starting, busy or idle (direct mode only).
+    mate: String,
+    session: Option<String>,
+    /// Unix seconds of the last successful read, and the last error.
+    polled: Option<i64>,
+    error: Option<String>,
+    tasks: Vec<crew::Task>,
+    finished: Vec<crew::Task>,
+}
+
+#[tauri::command]
+fn crew_fleet(
+    crew: State<'_, Arc<Crew>>,
+    mate: State<'_, Arc<FirstMate>>,
+    store: State<'_, Arc<ModelStore>>,
+) -> Fleet {
+    let s = store.settings();
+    let direct = firstmate::direct(&store);
+    let (polled, error) = crew.poll_status();
+    Fleet {
+        on: s.brain.as_deref() == Some("crew"),
+        direct,
+        home: crew::CrewConfig::from_settings(&store).home,
+        mate: if direct { mate.status().into() } else { "separate".into() },
+        session: s.crew_session.clone(),
+        polled,
+        error,
+        tasks: crew.tasks(),
+        finished: crew.finished(),
+    }
+}
+
+// Async for the same reason as history_open.
+#[tauri::command]
+async fn crew_window_open<R: Runtime>(app: AppHandle<R>) {
+    open_crew_window(&app);
+}
+
+/// Shows the Crew window (the crew's sessions and their status), creating it if needed.
+fn open_crew_window<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(w) = app.get_webview_window("crew") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let built = tauri::WebviewWindowBuilder::new(app, "crew", tauri::WebviewUrl::App("crew.html".into()))
+        .title("Crew")
+        .inner_size(760.0, 560.0)
+        .min_inner_size(420.0, 320.0)
+        .build();
+    if let Err(e) = built {
+        log::error!("couldn't open the crew window: {e}");
+    }
 }
 
 /// Opens the first mate's terminal (a tmux session in WSL).
@@ -704,6 +779,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let crew_on = app.state::<Arc<ModelStore>>().settings().brain.as_deref() == Some("crew");
     let crew = CheckMenuItem::with_id(app, "crew", "Crew mode (firstmate)", true, crew_on, None::<&str>)?;
     let crew_open = MenuItem::with_id(app, "crew_open", "Open crew terminal", true, None::<&str>)?;
+    let crew_window = MenuItem::with_id(app, "crew_window", "Crew sessions…", true, None::<&str>)?;
     app.manage(BrainMenu { code: code.clone(), crew: crew.clone() });
     let sep3 = PredefinedMenuItem::separator(app)?;
     let current_model = app
@@ -743,7 +819,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let menu =
-        Menu::with_items(app, &[&talk, &listen, &voice, &voice_menu, &history_item, &forget, &sep3, &model_menu, &code, &code_folder, &code_window, &crew, &crew_open, &key, &sep, &choose, &follow, &fade, &bar_menu, &reset, &reload, &sep2, &quit])?;
+        Menu::with_items(app, &[&talk, &listen, &voice, &voice_menu, &history_item, &forget, &sep3, &model_menu, &code, &code_folder, &code_window, &crew, &crew_window, &crew_open, &key, &sep, &choose, &follow, &fade, &bar_menu, &reset, &reload, &sep2, &quit])?;
     // Kept so a right-click on the avatar can pop up the same menu; its
     // clicks go through the tray's on_menu_event handler below.
     app.manage(TrayMenu(menu.clone()));
@@ -775,6 +851,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 set_voice(app, on);
             }
             "history" => open_history(app),
+            "crew_window" => open_crew_window(app),
             "fade" => {
                 let store = app.state::<Arc<ModelStore>>();
                 let on = !store.settings().fade_bottom.unwrap_or(true);
@@ -1027,11 +1104,14 @@ pub fn run() {
             chat_send,
             chat_cancel,
             chat_reset,
+            code_commands,
             stt_prepare,
             tts_prepare,
             tts_synthesize,
             pick_claude_code_folder,
             crew_tasks,
+            crew_fleet,
+            crew_window_open,
             crew_open_terminal,
             open_url,
             transcribe,
