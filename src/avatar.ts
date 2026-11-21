@@ -24,6 +24,9 @@ export class Avatar {
   zoom = 1;
   /** CSS px kept free above the character for the speech bubble. */
   topReserve = 150;
+  /** Fades the bottom of the figure out over this fraction of its height (0 = off). */
+  fadeBottom = 0.16;
+  private fadeEnd = Infinity;
 
   constructor(canvas: HTMLCanvasElement) {
     this.app = new PIXI.Application({
@@ -133,6 +136,32 @@ export class Avatar {
     });
     model.scale.set(p.scale);
     model.position.set(p.x, p.y);
+    this.applyFade(p.y, p.scale);
+  }
+
+  /**
+   * Softly fades out the bottom edge of the figure, for models drawn without
+   * feet (like Aqua), so the cut-off reads as intentional.
+   */
+  private applyFade(y: number, scale: number) {
+    const model = this.model!;
+    const canvas = this.app.view as HTMLCanvasElement;
+    const nh = model.internalModel.height;
+    const figure = (this.crop.y1 - this.crop.y0) * nh * scale;
+    const end = y + this.crop.y1 * nh * scale;
+    const start = end - figure * this.fadeBottom;
+    if (this.fadeBottom <= 0) {
+      canvas.style.removeProperty("mask-image");
+      canvas.style.removeProperty("-webkit-mask-image");
+      this.fadeEnd = Infinity;
+      return;
+    }
+    // Ease the fade (more opaque near the top of the band) so there's no visible line.
+    const mask = `linear-gradient(to bottom, #000 ${start}px, rgba(0,0,0,.75) ${start + (end - start) * 0.4}px, rgba(0,0,0,.3) ${start + (end - start) * 0.75}px, transparent ${end}px)`;
+    canvas.style.setProperty("mask-image", mask);
+    canvas.style.setProperty("-webkit-mask-image", mask);
+    // Clicks on the faint part of the fade fall through like empty space.
+    this.fadeEnd = start + (end - start) * 0.6;
   }
 
   /** Y of the top of the character's head in CSS px, or null before a model is loaded. */
@@ -145,6 +174,7 @@ export class Avatar {
   /** True if the pixel under (x, y), in device pixels from the top-left, is part of the character. */
   hitTest(x: number, y: number): boolean {
     if (!this.model || this.model.alpha === 0) return false;
+    if (y / (window.devicePixelRatio || 1) > this.fadeEnd) return false;
     const gl = (this.app.renderer as PIXI.Renderer).gl;
     const h = gl.drawingBufferHeight;
     if (x < 0 || y < 0 || x >= gl.drawingBufferWidth || y >= h) return false;

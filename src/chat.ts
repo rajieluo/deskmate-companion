@@ -80,12 +80,14 @@ export class ChatUI {
     this.form.hidden = false;
     this.form.setAttribute("data-hit", "");
     this.input.focus();
+    this.placeBubble();
   }
 
   close() {
     this.form.hidden = true;
     this.form.removeAttribute("data-hit");
     this.input.blur();
+    this.placeBubble();
   }
 
   /** Records one spoken message, transcribes it locally and sends it. */
@@ -182,6 +184,7 @@ export class ChatUI {
     this.keyForm.hidden = false;
     this.keyForm.setAttribute("data-hit", "");
     this.keyInput.focus();
+    this.placeBubble();
   }
 
   private append(text: string) {

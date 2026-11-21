@@ -85,13 +85,15 @@ body {
   position: fixed;
   left: 14px;
   right: 14px;
-  bottom: 12px;
+  /* Vertically centred in the window, over her body. */
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   gap: 6px;
 }
 
 #api-key {
-  bottom: 56px;
+  transform: translateY(calc(-50% + 46px));
 }
 
 #chat input,
