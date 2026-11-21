@@ -39,6 +39,7 @@ export function speakable(text: string): string {
   return text
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/`([^`]*)`/g, "$1")
+    .replace(/\[([^\]\n]+)\]\(https?:\/\/[^\s)]+\)/g, "$1")
     .replace(/https?:\/\/\S+/g, "a link")
     .replace(/[*_#>~]+/g, "")
     .replace(/\p{Extended_Pictographic}/gu, "")

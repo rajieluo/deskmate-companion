@@ -27,6 +27,12 @@ export class KokoroEngine implements SpeechEngine {
   device: "cpu" | "gpu" = "cpu";
   private mode: Promise<"cpu" | "gpu" | "native"> | null = null;
 
+  /**
+   * Pitch factor. Clips are played back this much faster, which raises the pitch,
+   * and made this much slower to begin with, so the pace stays at `speed`.
+   */
+  pitch = 1;
+
   constructor(
     public voice = "af_heart",
     public speed = 1,
@@ -96,9 +102,12 @@ export class KokoroEngine implements SpeechEngine {
   async synthesize(text: string) {
     const device = await this.chooseMode();
     const id = ++this.nextId;
+    const pitch = this.pitch;
+    const speed = Math.min(2, Math.max(0.5, this.speed / pitch));
     return new Promise<{ audio: Float32Array; rate: number }>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.ensure().postMessage({ type: "speak", id, text, voice: this.voice, speed: this.speed, device });
+      // A higher sample rate makes the clip play faster and higher.
+      this.pending.set(id, { resolve: (clip) => resolve({ ...clip, rate: clip.rate * pitch }), reject });
+      this.ensure().postMessage({ type: "speak", id, text, voice: this.voice, speed, device });
     });
   }
 }

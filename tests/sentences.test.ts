@@ -30,5 +30,6 @@ describe("SentenceBuffer", () => {
 describe("speakable", () => {
   it("drops markdown, emoji and URLs", () => {
     expect(speakable("**Sure!** See https://x.com/a 😀 `npm i`")).toBe("Sure! See a link npm i");
+    expect(speakable("Read [Stripe's docs](https://docs.stripe.com/connect) first.")).toBe("Read Stripe's docs first.");
   });
 });

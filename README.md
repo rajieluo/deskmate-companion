@@ -54,6 +54,7 @@ Debugging tips:
 
 - **First run** loads `Documents\live2d models\1014100aqua\1014100.model3.json` if it exists. Otherwise it asks you to pick a `.model3.json` file.
 - **Tray icon** (bottom right of the taskbar): *Choose model…*, *Reset position*, *Reload*, *Quit*.
+- **Right-click** her to open the same options menu as the tray icon.
 - **Drag** the character to move her. The position and size are remembered.
 - **Click** her (or press **Ctrl+Shift+Space** anywhere) to open the chat box. Type and press Enter; Esc closes it.
 - The first time you chat she asks for an [Anthropic API key](https://console.anthropic.com/settings/keys). It is stored in Windows Credential Manager, never in a file. `ANTHROPIC_API_KEY` in the environment also works. *Set API key…* in the tray changes it.
@@ -77,6 +78,20 @@ Each message runs `claude -p` in that folder and continues the same Claude Code 
 
 Permissions: there is no one to click "Allow" in this mode, so it runs with `acceptEdits` by default. Claude Code can read and edit files in the folder, but shell commands outside its safe list are refused. Change `claude_code_permission_mode` in `settings.json` to `auto` (lets Claude Code's classifier allow safe commands) or another mode if you want more.
 
+## Crew mode (firstmate)
+
+Crew mode makes her the face of [firstmate](https://github.com/kunchenguid/firstmate), which runs several Claude Code sessions in parallel, each in its own git worktree. You talk to her; she passes it to firstmate's first mate, reads out its answers, and shows a badge for each task (blue working, amber needs you, green PR ready, red failed). Firstmate runs in WSL2. Setup and details: [docs/crew-setup.md](docs/crew-setup.md).
+
+### Announcements from the first mate
+
+The first mate can also start talking on its own, for example to say a job finished and its pull request is ready. It writes one file per announcement into `state/avatar-say/` under its home (create the folder if it's missing):
+
+- One plain-text `.txt` file per announcement, holding one spoken line in the same shape as a reply: it starts with one emotion tag (such as `[happy]`), then one to three short sentences, no Markdown. Example: `[happy] fix login is done. Its pull request is ready for you.`
+- Name files so lexical order is creation order, e.g. `<epoch-seconds>-<random>.txt`. They are said oldest first.
+- Write under a temporary name that doesn't end in `.txt` and then rename it, so a half-written file is never read: `printf '%s\n' "$line" > state/avatar-say/$name.tmp && mv state/avatar-say/$name.tmp state/avatar-say/$name.txt`.
+
+She checks the folder at every poll (every 4 seconds) and speaks each announcement once, just like a reply. Each file is deleted as soon as it's picked up. Announcements written while the app was closed are said the next time Crew mode starts. Empty or unreadable files are deleted without being said, and anything past the first 8 KB of a file is cut off.
+
 ## Chat settings
 
 Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistant\` (created on first run). Edit it while the app is closed:
@@ -91,6 +106,7 @@ Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistan
   "voice_enabled": true,
   "voice": "af_heart",
   "voice_speed": 1.0,
+  "voice_pitch": 1.0,
   "stt_model": "base.en",
   "stt_language": "en",
   "brain": "api",
@@ -102,7 +118,7 @@ Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistan
 - `character_name`: what she calls herself. Leave it `null` to use the model's folder name, tidied up: `Nicole` stays Nicole, `1014100aqua` becomes Aqua, `mori_suit` becomes Mori Suit.
 - `chat_model`: any Claude model id. The tray's **Chat model** submenu switches between Opus 5.5, Sonnet 5.5 and Haiku 5.5 without editing the file. The default is Claude Opus 5.5. `claude-haiku-5-5` is much cheaper and faster if replies are good enough for you.
 - `chat_effort`: `low` (default, quick chatty replies), `medium`, `high`, `xhigh` or `max`.
-- `voice_enabled`, `voice`, `voice_speed`: speech on or off, the Kokoro voice (`af_heart` by default; also `af_bella`, `af_nicole`, `af_sky`, `bf_emma` and [others](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md)) and speed (0.5 to 2).
+- `voice_enabled`, `voice`, `voice_speed`, `voice_pitch`: speech on or off, the Kokoro voice (`af_heart` by default; also `af_bella`, `af_nicole`, `af_sky`, `bf_emma` and [others](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md)), speed (0.5 to 2) and pitch (0.75 to 1.35). Speed and pitch also have sliders at the bottom of the poses panel; double-click a slider to reset it.
 - `stt_model`, `stt_language`: the Whisper model for voice input (`tiny.en`, `base.en` by default, `small.en` for better accuracy, or multilingual `small` with `"stt_language": "auto"`) and the spoken language.
 - `voice_device`: where the voice runs, `"cpu"` (default) or `"gpu"`. The GPU is faster, but on some cards (an RX 7900 XT, for one) it garbles the speech; when that happens the app notices and switches back to the CPU by itself.
 - `model_params`: parameter values to hold on a model every frame, keyed by its folder name, e.g. `"model_params": { "Nicole": { "MouthJawOpen": 0 } }`. Lip sync still moves the mouth while she speaks. The log lists each model's mouth parameters and their values when it loads.
@@ -132,6 +148,8 @@ voice: af_bella
 ---
 You are Nicole Demara, ...
 ``` Persona files for characters you don't own stay on your machine; don't commit them here.
+
+Whenever a model is loaded (at startup or when you switch models), the app also writes that model's persona text, front matter stripped, to `%APPDATA%\com.rajieluo.desktopassistant\current-persona.md`, so other tools such as firstmate can take on the same character. When the loaded model has no persona file, `current-persona.md` is deleted: no file means no persona. This copy is refreshed only on a model load or switch, so edits to a persona file reach it the next time that model is loaded. Don't edit `current-persona.md` itself; it is overwritten.
 
 Claude starts each reply with an emotion tag such as `[happy]`. The app strips the tags from the text and plays the matching motion. The API call is made from the Rust side, so the key never reaches the web page. Server-side refusal fallbacks are turned on, so if Claude Opus 5.5 declines a message the API retries it on a fallback model in the same call.
 

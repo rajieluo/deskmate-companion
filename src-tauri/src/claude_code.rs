@@ -15,12 +15,20 @@ use std::{
 
 use serde::Serialize;
 use serde_json::Value;
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::chat::{ChatError, Delta, Done, EMOTION_TAGS};
+use crate::sessions;
 
 pub const DEFAULT_PERMISSION_MODE: &str = "acceptEdits";
+
+const SESSION_TAG: &str = "new-session";
+const WINDOW_TAG: &str = "new-window";
+const SESSION_OPEN: &str = "<new-session";
+const WINDOW_OPEN: &str = "<new-window";
+const SWITCH_OPEN: &str = "<switch-session";
+const OPENERS: [&str; 3] = [SESSION_OPEN, WINDOW_OPEN, SWITCH_OPEN];
 
 #[derive(Clone, Serialize)]
 pub struct Activity {
@@ -28,7 +36,151 @@ pub struct Activity {
     pub text: String,
 }
 
-pub fn avatar_prompt(name: &str, character: Option<&str>) -> String {
+/// What a reply asked the app to start, from a hidden `<new-session>` or `<new-window>` tag.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Handoff {
+    pub kind: HandoffKind,
+    pub folder: Option<String>,
+    pub brief: String,
+    /// The session to switch to.
+    pub id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum HandoffKind {
+    /// A fresh session in the app.
+    Session,
+    /// A separate terminal window running Claude Code.
+    Window,
+    /// Carry on an existing session in the app.
+    Switch,
+}
+
+/// Sent to the page after a handoff, as `code-handoff`.
+#[derive(Clone, Serialize)]
+pub struct HandoffEvent {
+    pub turn: u64,
+    /// "session", "window" or "switch"
+    pub kind: String,
+    pub brief: String,
+    /// The folder the new session runs in.
+    pub folder: String,
+    /// Set when the app couldn't do it.
+    pub error: Option<String>,
+}
+
+/// Takes the handoff tag out of streamed text, so it's never shown or spoken.
+/// Text arrives in arbitrary chunks, so a tag may be split across two of them.
+#[derive(Default)]
+pub struct HandoffFilter {
+    held: String,
+    captured: Option<String>,
+}
+
+impl HandoffFilter {
+    /// Returns the part of `chunk` that may be shown now.
+    pub fn push(&mut self, chunk: &str) -> String {
+        if let Some(c) = &mut self.captured {
+            c.push_str(chunk);
+            return String::new();
+        }
+        let mut s = std::mem::take(&mut self.held);
+        s.push_str(chunk);
+        if let Some(i) = OPENERS.iter().filter_map(|o| s.find(o)).min() {
+            // Everything from the tag on is for the app.
+            self.captured = Some(s[i..].to_string());
+            s.truncate(i);
+            return s;
+        }
+        // Hold back a possible start of a tag at the very end.
+        if let Some(i) = s.rfind('<') {
+            if OPENERS.iter().any(|o| o.starts_with(&s[i..])) {
+                self.held = s[i..].to_string();
+                s.truncate(i);
+            }
+        }
+        s
+    }
+
+    /// Call when the reply ends: the text still held back, and the handoff if there was one.
+    pub fn finish(&mut self) -> (String, Option<Handoff>) {
+        let rest = std::mem::take(&mut self.held);
+        (rest, self.captured.take().and_then(|c| parse_handoff(&c)))
+    }
+}
+
+fn parse_handoff(text: &str) -> Option<Handoff> {
+    let (kind, open, tag) = if text.starts_with(WINDOW_OPEN) {
+        (HandoffKind::Window, WINDOW_OPEN, WINDOW_TAG)
+    } else if text.starts_with(SWITCH_OPEN) {
+        (HandoffKind::Switch, SWITCH_OPEN, "switch-session")
+    } else {
+        (HandoffKind::Session, SESSION_OPEN, SESSION_TAG)
+    };
+    let rest = &text[open.len()..];
+    // "<new-sessionfoo" isn't our tag.
+    if !rest.starts_with(|c: char| c == '>' || c == '/' || c.is_whitespace()) {
+        return None;
+    }
+    let end = rest.find('>')?;
+    let attrs = &rest[..end];
+    let attr = |name: &str| {
+        let key = format!("{name}=");
+        attrs.find(&key).and_then(|i| {
+            let v = &attrs[i + key.len()..];
+            let quote = v.chars().next().filter(|c| *c == '"' || *c == '\'')?;
+            let v = &v[1..];
+            v.find(quote).map(|j| v[..j].trim().to_string()).filter(|v| !v.is_empty())
+        })
+    };
+    let body = if attrs.trim_end().ends_with('/') { "" } else { &rest[end + 1..] };
+    let close = format!("</{tag}>");
+    let brief = body.find(&close).map(|j| &body[..j]).unwrap_or(body).trim().to_string();
+    let id = attr("id");
+    if kind == HandoffKind::Switch && id.is_none() {
+        return None;
+    }
+    Some(Handoff { kind, folder: attr("folder"), brief, id })
+}
+
+/// Where a handoff runs: its folder (absolute, or relative to `current`) if that exists, else `current`.
+pub fn handoff_folder(current: &Path, folder: Option<&str>) -> PathBuf {
+    let Some(f) = folder else { return current.to_path_buf() };
+    let f = if let Some(rest) = f.strip_prefix("~/").or_else(|| f.strip_prefix("~\\")) {
+        std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+            .map(|h| PathBuf::from(h).join(rest))
+            .unwrap_or_else(|| PathBuf::from(f))
+    } else {
+        PathBuf::from(f)
+    };
+    let path = if f.is_absolute() { f } else { current.join(f) };
+    if path.is_dir() { path } else { current.to_path_buf() }
+}
+
+/// Opens a new console window running interactive Claude Code in `folder`, starting with `brief`.
+/// The app launches it, not the agent, so no Claude Code permission rule is involved.
+pub fn open_window(folder: &Path, brief: &str) -> Result<(), String> {
+    if !cfg!(windows) {
+        return Err("Opening a Claude Code window is only supported on Windows.".into());
+    }
+    let claude = find_claude().ok_or("I can't find Claude Code. Install it from https://claude.com/claude-code first.")?;
+    let mut cmd = std::process::Command::new(claude);
+    cmd.current_dir(folder);
+    // One line: claude.cmd (npm installs) goes through cmd.exe, which can't take newlines.
+    let brief = brief.split_whitespace().collect::<Vec<_>>().join(" ");
+    if !brief.is_empty() {
+        cmd.arg(brief);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0000_0010); // CREATE_NEW_CONSOLE
+    }
+    cmd.spawn().map(|_| ()).map_err(|e| format!("Couldn't open a Claude Code window: {e}"))
+}
+
+pub fn avatar_prompt(name: &str, character: Option<&str>, sessions_file: &Path) -> String {
+    let sessions_file = sessions_file.display();
     let mut prompt = format!(
         "You are also {name}, an animated character on the user's desktop, and everything you write \
 is shown in a small speech bubble and read aloud. Work on the user's request as usual, but keep \
@@ -36,7 +188,29 @@ what you write short and conversational: no Markdown, no lists, no code blocks i
 (put code in files instead), and don't narrate each step, since the user already sees which tools \
 you use. Finish with one to three spoken sentences saying what you did or found. Start each \
 message with exactly one emotion tag from: {EMOTION_TAGS}. The tags are hidden from the user and \
-make your body move."
+make your body move.
+
+You can't open terminals, new windows or other Claude Code sessions with your tools, and you don't \
+need to: the app does it for you. Never try to launch a terminal, PowerShell or `claude` with Bash \
+or PowerShell for this. Instead, when the user asks you to start something in a new session, \
+thread, chat or window, say in one sentence what you're starting, then end your message with one \
+of these, which the user never sees:
+{SESSION_OPEN}>a brief for the new session</{SESSION_TAG}>
+starts a fresh Claude Code session here in the app and sends it the brief as its first message, \
+so this conversation ends there (the user keeps talking to you in the new one).
+{WINDOW_OPEN}>a brief for the new session</{WINDOW_TAG}>
+opens a separate terminal window running Claude Code with the brief, which the user works in \
+directly while this conversation carries on. Use it only when the user asks for a window or \
+terminal, or wants to keep this conversation going too.
+Either one can take folder=\"...\" after its name (absolute, or relative to the folder you're in) to \
+start in another folder. Write the brief to the new session, not to the user: what the user wants \
+and the context it needs from this conversation, since it starts with no memory of it.
+
+The app keeps a list of the Claude Code sessions on this computer (id, folder, when last used, \
+title or first message, and which ones you started) in {sessions_file}, updated each time the user \
+writes to you. Read it when the user asks about their sessions, and tell them about the few that \
+matter in plain words, not ids. To carry on one of them here instead of this conversation, end your \
+message with <switch-session id=\"...\"/> using its id from that list."
     );
     if let Some(text) = character {
         prompt.push_str(&format!(
@@ -52,12 +226,16 @@ files, commands, facts) stays careful, correct and complete, exactly as it would
 pub struct ClaudeCode {
     session: Mutex<Option<String>>,
     turn: AtomicU64,
+    /// Sessions started from the avatar during this app run.
+    ours: Mutex<std::collections::HashSet<String>>,
 }
 
 pub struct RunConfig {
     pub folder: PathBuf,
     pub permission_mode: String,
     pub prompt_file: PathBuf,
+    /// Holds the sessions list; the agent may read it (`--add-dir`).
+    pub sessions_dir: PathBuf,
     pub name: String,
     /// The model's persona file, if it has one.
     pub character: Option<String>,
@@ -102,6 +280,69 @@ impl ClaudeCode {
         self.turn.fetch_add(1, Ordering::SeqCst) + 1
     }
 
+    /// Does what a reply's handoff tag asked for, and tells the page with `code-handoff`.
+    fn hand_off<R: Runtime>(&self, app: &AppHandle<R>, turn: u64, h: Handoff, current: &Path) {
+        let mut folder = handoff_folder(current, h.folder.as_deref());
+        let error = match h.kind {
+            HandoffKind::Window => open_window(&folder, &h.brief).err(),
+            HandoffKind::Session => {
+                // The next message starts a new session (no --resume).
+                *self.session.lock().unwrap() = None;
+                None
+            }
+            HandoffKind::Switch => {
+                let id = h.id.clone().unwrap_or_default();
+                // A session only resumes from the folder it ran in.
+                match sessions::projects_dir().and_then(|p| sessions::find(&p, &id)) {
+                    Some(s) if Path::new(&s.folder).is_dir() => {
+                        folder = PathBuf::from(&s.folder);
+                        *self.session.lock().unwrap() = Some(id);
+                        None
+                    }
+                    Some(s) => Some(format!("That session's folder is gone: {}", s.folder)),
+                    None => Some("I couldn't find that session.".to_string()),
+                }
+            }
+        };
+        if error.is_none() && h.kind != HandoffKind::Window && folder != current {
+            app.state::<std::sync::Arc<crate::model::ModelStore>>()
+                .update(|s| s.claude_code_folder = Some(folder.clone()));
+        }
+        if let Some(e) = &error {
+            log::warn!("handoff failed: {e}");
+        }
+        let _ = app.emit(
+            "code-handoff",
+            HandoffEvent {
+                turn,
+                kind: match h.kind {
+                    HandoffKind::Session => "session",
+                    HandoffKind::Window => "window",
+                    HandoffKind::Switch => "switch",
+                }
+                .into(),
+                brief: h.brief,
+                folder: folder.display().to_string(),
+                error,
+            },
+        );
+    }
+
+    fn write_sessions_list(&self, dir: &Path, file: &Path) {
+        let text = match sessions::projects_dir() {
+            Some(projects) => sessions::render(
+                &sessions::list(&projects, 15),
+                self.session.lock().unwrap().as_deref(),
+                &self.ours.lock().unwrap(),
+                std::time::SystemTime::now(),
+            ),
+            None => "(I can't find Claude Code's sessions folder.)\n".into(),
+        };
+        if let Err(e) = std::fs::create_dir_all(dir).and_then(|_| std::fs::write(file, text)) {
+            log::warn!("couldn't write the sessions list: {e}");
+        }
+    }
+
     /// Streams one reply as chat-* events tagged with `turn`.
     pub async fn run<R: Runtime>(&self, app: &AppHandle<R>, turn: u64, text: String, config: RunConfig) -> u64 {
         let error = |kind: &str, message: String| {
@@ -116,10 +357,12 @@ impl ClaudeCode {
             error("no_folder", "Pick a folder for Claude Code to work in first.".into());
             return turn;
         }
-        if let Err(e) = std::fs::write(&config.prompt_file, avatar_prompt(&config.name, config.character.as_deref())) {
+        let sessions_file = config.sessions_dir.join("sessions.md");
+        if let Err(e) = std::fs::write(&config.prompt_file, avatar_prompt(&config.name, config.character.as_deref(), &sessions_file)) {
             error("api", format!("Couldn't write the avatar prompt: {e}"));
             return turn;
         }
+        self.write_sessions_list(&config.sessions_dir, &sessions_file);
 
         let mut cmd = tokio::process::Command::new(&claude);
         cmd.current_dir(&config.folder)
@@ -127,7 +370,9 @@ impl ClaudeCode {
             .arg("--permission-mode")
             .arg(&config.permission_mode)
             .arg("--append-system-prompt-file")
-            .arg(&config.prompt_file);
+            .arg(&config.prompt_file)
+            .arg("--add-dir")
+            .arg(&config.sessions_dir);
         if let Some(session) = self.session.lock().unwrap().clone() {
             cmd.arg("--resume").arg(session);
         }
@@ -153,6 +398,7 @@ impl ClaudeCode {
         let stdout = child.stdout.take().expect("piped stdout");
         let mut lines = BufReader::new(stdout).lines();
         let mut parser = StreamParser::default();
+        let mut filter = HandoffFilter::default();
         loop {
             if self.turn.load(Ordering::SeqCst) != turn {
                 let _ = child.kill().await;
@@ -171,7 +417,10 @@ impl ClaudeCode {
             for out in parser.feed(&line) {
                 match out {
                     Out::Text(t) => {
-                        let _ = app.emit("chat-delta", Delta { turn, text: t });
+                        let t = filter.push(&t);
+                        if !t.is_empty() {
+                            let _ = app.emit("chat-delta", Delta { turn, text: t });
+                        }
                     }
                     Out::Activity(t) => {
                         let _ = app.emit("chat-activity", Activity { turn, text: t });
@@ -180,13 +429,21 @@ impl ClaudeCode {
             }
         }
 
+        let (rest, handoff) = filter.finish();
+        if !rest.is_empty() {
+            let _ = app.emit("chat-delta", Delta { turn, text: rest });
+        }
         let status = child.wait().await.ok();
         if let Some(id) = parser.session_id.clone() {
+            self.ours.lock().unwrap().insert(id.clone());
             *self.session.lock().unwrap() = Some(id);
         }
         match parser.result {
             Some(Ok(())) => {
                 let _ = app.emit("chat-done", Done { turn, model: parser.model, stop_reason: None });
+                if let Some(h) = handoff {
+                    self.hand_off(app, turn, h, &config.folder);
+                }
             }
             Some(Err(message)) => error("api", message),
             None => {
@@ -392,10 +649,77 @@ mod tests {
         assert!(d.starts_with("Running npm test") && d.chars().count() <= 57);
     }
 
+    fn filter_all(chunks: &[&str]) -> (String, Option<Handoff>) {
+        let mut f = HandoffFilter::default();
+        let mut shown: String = chunks.iter().map(|c| f.push(c)).collect();
+        let (rest, h) = f.finish();
+        shown.push_str(&rest);
+        (shown, h)
+    }
+
+    #[test]
+    fn takes_a_split_handoff_tag_out_of_the_text() {
+        let (shown, h) = filter_all(&[
+            "[happy] Starting a fresh session for that. <new-se",
+            "ssion>Help Alex prep for their Acme Widget\n",
+            "interview.</new-session>",
+        ]);
+        assert_eq!(shown, "[happy] Starting a fresh session for that. ");
+        assert_eq!(
+            h,
+            Some(Handoff { kind: HandoffKind::Session, folder: None, brief: "Help Alex prep for their Acme Widget\ninterview.".into(), id: None })
+        );
+    }
+
+    #[test]
+    fn reads_a_window_handoff_with_a_folder() {
+        let (shown, h) = filter_all(&["Opening it. ", r#"<new-window folder="job-scanner">Check the resume.</new-window>"#]);
+        assert_eq!(shown, "Opening it. ");
+        let h = h.unwrap();
+        assert_eq!(h.kind, HandoffKind::Window);
+        assert_eq!(h.folder.as_deref(), Some("job-scanner"));
+        assert_eq!(h.brief, "Check the resume.");
+        let (_, h) = filter_all(&["<new-session/>"]);
+        assert_eq!(h.unwrap().brief, "");
+        let (shown, h) = filter_all(&["Back to that one. <switch-ses", r#"sion id="abc-123"/>"#]);
+        assert_eq!(shown, "Back to that one. ");
+        let h = h.unwrap();
+        assert_eq!((h.kind, h.id.as_deref()), (HandoffKind::Switch, Some("abc-123")));
+        assert_eq!(filter_all(&["<switch-session/>"]).1, None, "a switch needs an id");
+    }
+
+    #[test]
+    fn leaves_other_angle_brackets_alone() {
+        let (shown, h) = filter_all(&["a <b> c <", "new thing> and x<", "3"]);
+        assert_eq!(shown, "a <b> c <new thing> and x<3");
+        assert_eq!(h, None);
+        let (shown, h) = filter_all(&["ends with <new"]);
+        assert_eq!(shown, "ends with <new");
+        assert_eq!(h, None);
+    }
+
+    #[test]
+    fn handoff_folder_falls_back_to_the_current_one() {
+        let here = std::env::temp_dir();
+        assert_eq!(handoff_folder(&here, None), here);
+        assert_eq!(handoff_folder(&here, Some("no-such-folder-xyz")), here);
+        let sub = here.join("handoff-folder-test");
+        std::fs::create_dir_all(&sub).unwrap();
+        assert_eq!(handoff_folder(&here, Some("handoff-folder-test")), sub);
+        assert_eq!(handoff_folder(&here, Some(sub.to_str().unwrap())), sub);
+    }
+
+    #[test]
+    fn prompt_explains_handoffs() {
+        let p = avatar_prompt("Jane", None, Path::new("/cfg/sessions/sessions.md"));
+        assert!(p.contains("<new-session>a brief") && p.contains("<new-window>a brief") && p.contains("folder=\"...\""));
+        assert!(p.contains("/cfg/sessions/sessions.md") && p.contains("<switch-session id=\"...\"/>"));
+    }
+
     #[test]
     fn prompt_adds_the_character_only_when_given() {
-        assert!(!avatar_prompt("Aqua", None).contains("Your character"));
-        let p = avatar_prompt("Nicole", Some("Boss of a tiny agency."));
+        assert!(!avatar_prompt("Aqua", None, Path::new("s.md")).contains("Your character"));
+        let p = avatar_prompt("Nicole", Some("Boss of a tiny agency."), Path::new("s.md"));
         assert!(p.contains("Boss of a tiny agency.") && p.contains("careful, correct and complete"));
     }
 }

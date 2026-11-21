@@ -1,5 +1,6 @@
 import { Avatar } from "./avatar";
 import { ChatUI } from "./chat";
+import { CrewUI } from "./crew";
 import { PosePicker } from "./picker";
 import * as host from "./host";
 import { EMOTIONS } from "./motions";
@@ -16,8 +17,27 @@ const useBeep = !host.inTauri && new URLSearchParams(location.search).get("tts")
 const voice = new Voice(useBeep ? new BeepEngine() : kokoro);
 avatar.setMouthSource(() => voice.level());
 (window as unknown as { voice: Voice }).voice = voice;
-const poses = new PosePicker(avatar);
+const poses = new PosePicker(avatar, {
+  get speed() {
+    return kokoro.speed;
+  },
+  get pitch() {
+    return kokoro.pitch;
+  },
+  set({ speed = kokoro.speed, pitch = kokoro.pitch }) {
+    kokoro.speed = speed;
+    kokoro.pitch = pitch;
+    host.setVoiceTuning(speed, pitch);
+    if (voice.enabled) {
+      voice.stop();
+      voice.say("Hi! This is how I sound now.");
+    }
+  },
+});
 const chat = new ChatUI(avatar, voice);
+const crew = new CrewUI();
+chat.onModeChange = (brain) => crew.setEnabled(brain === "crew");
+(window as unknown as { crewUI: CrewUI }).crewUI = crew;
 kokoro.onStatus = (s) => chat.status(s);
 void host.chatStatus().then((s) => {
   voice.enabled = s.voice_enabled;
@@ -25,6 +45,7 @@ void host.chatStatus().then((s) => {
   avatar.setFade(s.fade_bottom);
   kokoro.voice = s.voice;
   kokoro.speed = s.voice_speed;
+  kokoro.pitch = s.voice_pitch;
   kokoro.device = s.voice_device === "gpu" ? "gpu" : "cpu";
   // Start the (large, first-time) model download early instead of on the first reply.
   if (s.voice_enabled && !useBeep) kokoro.warmUp();
@@ -127,6 +148,12 @@ canvas.addEventListener("mouseup", () => {
   // A click (no drag) opens or closes the chat box.
   if (press) chat.toggle();
   press = null;
+});
+// Right-click on her opens the same options menu as the tray icon,
+// instead of the browser's "Copy image / Save image" menu.
+canvas.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  host.showMenu();
 });
 
 // --- Ctrl + mouse wheel resizes the window (and the character with it).

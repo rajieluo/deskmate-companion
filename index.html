@@ -27,7 +27,7 @@
           <path fill="currentColor" d="M3 10v4h4l5 5V5L7 10H3Zm13.6 2 2.7-2.7-1.4-1.4-2.7 2.7-2.7-2.7-1.4 1.4 2.7 2.7-2.7 2.7 1.4 1.4 2.7-2.7 2.7 2.7 1.4-1.4-2.7-2.7Z"/>
         </svg>
       </button>
-      <button id="poses-btn" type="button" title="Poses and animations" aria-label="Poses and animations">
+      <button id="poses-btn" type="button" title="Poses, animations and voice" aria-label="Poses, animations and voice">
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
           <path fill="currentColor" d="M12 2a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Zm-7 6h14v2h-5v12h-2v-6h-0v6h-2V10H5V8Z"/>
         </svg>
@@ -42,6 +42,8 @@
       <input id="api-key-input" type="password" placeholder="sk-ant-…" />
       <button type="submit">Save</button>
     </form>
+    <div id="crew" hidden></div>
+    <div id="crew-card" hidden></div>
     <div id="status" hidden>
       <p id="status-text"></p>
       <button id="status-pick" type="button" hidden>Choose model…</button>

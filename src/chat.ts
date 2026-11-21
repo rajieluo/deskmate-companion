@@ -3,6 +3,7 @@ import type { Avatar } from "./avatar";
 import * as host from "./host";
 import { SentenceBuffer, speakable } from "./sentences";
 import { TagStream } from "./tags";
+import { setLinkedText } from "./links";
 import { Mic } from "./mic";
 import type { Voice } from "./voice";
 
@@ -29,6 +30,8 @@ export class ChatUI {
   private tags = new TagStream();
   private sentences = new SentenceBuffer();
   private hideTimer: number | undefined;
+  /** The bubble's text as written (links stay "[label](url)" here, for the history). */
+  private bubbleRaw = "";
   private name = "Assistant";
 
   constructor(
@@ -91,10 +94,16 @@ export class ChatUI {
       this.say(
         brain === "claude_code"
           ? "Claude Code mode: I'll work in your folder with Claude Code."
-          : "Back to normal chat.",
+          : brain === "crew"
+            ? "Crew mode: I'll pass what you say to the first mate and tell you how the crew is doing."
+            : "Back to normal chat.",
         4000,
       );
     });
+    host.onCodeHandoff((h) => void this.onHandoff(h));
+    host.onCrewReply((body) => this.speakOut(body));
+    host.onCrewAttention((a) => this.speakOut(a.speech));
+    host.onCrewError((message) => this.say(message, 8000));
   }
 
   get isOpen() {
@@ -162,21 +171,68 @@ export class ChatUI {
 
   private setMode(brain: string) {
     document.body.dataset.brain = brain;
-    this.input.placeholder = brain === "claude_code" ? `Ask ${this.name} to code…` : `Talk to ${this.name}…`;
+    this.input.placeholder =
+      brain === "claude_code"
+        ? `Ask ${this.name} to code…`
+        : brain === "crew"
+          ? "Tell the crew…"
+          : `Talk to ${this.name}…`;
+    this.onModeChange?.(brain);
   }
 
-  async send(text: string) {
+  /** Called whenever the brain changes (Crew mode shows its badges). */
+  onModeChange?: (brain: string) => void;
+
+  /** Something she says on her own, such as a crew reply: tags move her, the rest is shown and spoken. */
+  speakOut(text: string) {
+    const tags = new TagStream();
+    const first = tags.feed(text);
+    const last = tags.end();
+    for (const mood of [...first.moods, ...last.moods]) if (mood !== "neutral") this.avatar.emote(mood);
+    const plain = (first.text + last.text).trim();
+    if (!plain) return;
+    host.historyAppend("assistant", plain);
+    this.bubble.classList.remove("thinking");
+    this.activity.hidden = true;
+    this.say(plain);
+    const sentences = new SentenceBuffer();
+    for (const s of [...sentences.push(plain), ...sentences.flush()]) this.voice.say(speakable(s));
+    this.scheduleHide(Math.min(30000, 5000 + plain.split(/\s+/).length * 350));
+  }
+
+  /** Claude Code asked for a new session: the app has already dropped the old one. */
+  private async onHandoff(h: host.CodeHandoff) {
+    const where = h.folder.split(/[\\/]/).filter(Boolean).pop() ?? h.folder;
+    if (h.error) {
+      this.avatar.emote("sad");
+      this.say(h.error, 10000);
+      return;
+    }
+    if (h.kind !== "session") return; // she already said what she is doing
+    // Let her finish saying what she's starting before the new session talks over her.
+    for (let waited = 0; this.voice.speaking && waited < 30000; waited += 250) {
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    if (h.turn !== this.turn) return; // the user already said something else
+    if (!h.brief) {
+      this.say(`(Fresh session in ${where}.)`, 4000);
+      return;
+    }
+    await this.send(h.brief, `(New session in ${where}) ${h.brief}`);
+  }
+
+  async send(text: string, historyText = text) {
     const status = await host.chatStatus();
     if (status.brain === "api" && !status.has_key) {
       this.askForKey();
       return;
     }
-    host.historyAppend("user", text);
+    host.historyAppend("user", historyText);
     this.tags = new TagStream();
     this.sentences = new SentenceBuffer();
     this.voice.stop();
     this.say("…");
-    this.bubbleText.textContent = "";
+    this.setBubbleText("");
     this.activity.hidden = true;
     this.bubble.classList.add("thinking");
     if (this.turn) this.floor = this.turn + 1;
@@ -216,8 +272,8 @@ export class ChatUI {
     this.append(rest);
     for (const s of [...this.sentences.push(rest), ...this.sentences.flush()]) this.voice.say(speakable(s));
     this.bubble.classList.remove("thinking");
-    host.historyAppend("assistant", this.bubbleText.textContent ?? "");
-    const words = (this.bubbleText.textContent ?? "").split(/\s+/).length;
+    host.historyAppend("assistant", this.bubbleRaw);
+    const words = this.bubbleRaw.split(/\s+/).length;
     this.scheduleHide(Math.min(30000, 5000 + words * 350));
   }
 
@@ -230,6 +286,11 @@ export class ChatUI {
       return;
     }
     if (kind === "cancelled") return;
+    if (kind === "crew") {
+      this.avatar.emote("sad");
+      this.say(message, 10000);
+      return;
+    }
     if (kind === "no_key" || kind === "auth") {
       this.askForKey(kind === "auth" ? "That API key didn't work." : undefined);
       return;
@@ -251,9 +312,14 @@ export class ChatUI {
   }
 
   private append(text: string) {
-    this.bubbleText.textContent += text;
+    this.setBubbleText(this.bubbleRaw + text);
     this.bubble.scrollTop = this.bubble.scrollHeight;
     this.placeBubble();
+  }
+
+  private setBubbleText(text: string) {
+    this.bubbleRaw = text;
+    setLinkedText(this.bubbleText, text);
   }
 
   /** Sits the bubble just above the character's head (overlapping the hair a little). */
@@ -266,7 +332,7 @@ export class ChatUI {
 
   private say(text: string, hideAfter?: number) {
     window.clearTimeout(this.hideTimer);
-    this.bubbleText.textContent = text;
+    this.setBubbleText(text);
     this.bubble.hidden = false;
     this.bubble.setAttribute("data-hit", "");
     this.placeBubble();

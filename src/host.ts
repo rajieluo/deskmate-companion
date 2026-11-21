@@ -82,6 +82,11 @@ export function setClickThrough(on: boolean) {
   void getCurrentWindow().setIgnoreCursorEvents(on);
 }
 
+/** Pops up the tray's options menu at the cursor. */
+export function showMenu() {
+  if (inTauri) void invoke("show_menu").catch((e) => console.warn("[menu]", e));
+}
+
 export function startDrag() {
   if (inTauri) void getCurrentWindow().startDragging();
 }
@@ -112,8 +117,9 @@ export interface ChatStatus {
   fade_bottom: boolean;
   voice: string;
   voice_speed: number;
+  voice_pitch: number;
   voice_device: string;
-  brain: "api" | "claude_code";
+  brain: "api" | "claude_code" | "crew";
   claude_code_folder: string | null;
 }
 export interface ChatHandlers {
@@ -171,6 +177,11 @@ export function setVoiceEnabled(on: boolean) {
 
 const browserVoiceListeners: ((on: boolean) => void)[] = [];
 
+/** Saves the voice speed (0.5 to 2) and pitch (0.75 to 1.35) to settings. */
+export function setVoiceTuning(speed: number, pitch: number) {
+  if (inTauri) void invoke("set_voice_tuning", { speed, pitch }).catch((e) => console.warn("[voice]", e));
+}
+
 /** Motion and expression files in the current model's folder (relative paths). */
 export async function modelFiles(): Promise<string[]> {
   if (inTauri) return invoke<string[]>("model_files").catch(() => []);
@@ -186,7 +197,7 @@ export function log(level: "info" | "warn" | "error", message: string) {
 
 export async function chatStatus(): Promise<ChatStatus> {
   if (!inTauri) {
-    return { hotkeys: { talk: "Ctrl+Shift+Space", listen: "Ctrl+Alt+M", mute: "Ctrl+Alt+U" }, has_key: true, name: "Aqua", model: "demo", voice_enabled: true, follow_mouse: true, fade_bottom: true, voice: "af_heart", voice_speed: 1, voice_device: "cpu", brain: "api", claude_code_folder: null };
+    return { hotkeys: { talk: "Ctrl+Shift+Space", listen: "Ctrl+Alt+M", mute: "Ctrl+Alt+U" }, has_key: true, name: "Aqua", model: "demo", voice_enabled: true, follow_mouse: true, fade_bottom: true, voice: "af_heart", voice_speed: 1, voice_pitch: 1, voice_device: "cpu", brain: "api", claude_code_folder: null };
   }
   return invoke<ChatStatus>("chat_status");
 }
@@ -295,4 +306,68 @@ export function onBrainChanged(cb: (brain: string) => void) {
 
 export function onModelPicked(cb: (model: string) => void) {
   if (inTauri) void listen<string>("model-picked", (e) => cb(e.payload));
+}
+
+// --- Crew mode (firstmate in WSL; see src-tauri/src/crew.rs).
+
+export interface CrewTask {
+  id: string;
+  kind: string | null;
+  project: string | null;
+  /** working, needs-decision, blocked, paused, done, failed, resolved, pr-ready, merged */
+  state: string;
+  text: string;
+  pr: string | null;
+  updated: number;
+}
+
+export interface CrewAttention {
+  task: string;
+  kind: string;
+  /** What she says, starting with an emotion tag. */
+  speech: string;
+}
+
+export async function crewTasks(): Promise<CrewTask[]> {
+  return inTauri ? invoke<CrewTask[]>("crew_tasks") : [];
+}
+
+export async function crewOpenTerminal() {
+  if (inTauri) await invoke("crew_open_terminal");
+}
+
+export async function openUrl(url: string) {
+  if (inTauri) await invoke("open_url", { url });
+  else window.open(url, "_blank");
+}
+
+export function onCrewTasks(cb: (tasks: CrewTask[]) => void) {
+  if (inTauri) void listen<CrewTask[]>("crew-tasks", (e) => cb(e.payload));
+}
+
+/** The first mate's answer to a message (published with fm-inbox.sh reply). */
+/** Claude Code asked the app for a fresh session (kind "session") or a new terminal window ("window"). */
+export interface CodeHandoff {
+  turn: number;
+  kind: "session" | "window" | "switch";
+  brief: string;
+  folder: string;
+  error: string | null;
+}
+
+export function onCodeHandoff(cb: (h: CodeHandoff) => void) {
+  if (inTauri) void listen<CodeHandoff>("code-handoff", (e) => cb(e.payload));
+}
+
+export function onCrewReply(cb: (body: string) => void) {
+  if (inTauri) void listen<{ id: string; body: string }>("crew-reply", (e) => cb(e.payload.body));
+}
+
+/** A task needs you, failed, or has a PR ready. */
+export function onCrewAttention(cb: (a: CrewAttention) => void) {
+  if (inTauri) void listen<CrewAttention>("crew-attention", (e) => cb(e.payload));
+}
+
+export function onCrewError(cb: (message: string) => void) {
+  if (inTauri) void listen<string>("crew-error", (e) => cb(e.payload));
 }
