@@ -556,6 +556,15 @@ impl StreamParser {
         out
     }
 
+    /// Forgets the reply just finished (keeps the session), for a session that runs
+    /// many turns in one process.
+    pub fn next_turn(&mut self) {
+        self.result = None;
+        self.streamed_partial = false;
+        self.wrote_text = false;
+        self.need_break = false;
+    }
+
     fn push_text(&mut self, t: &str, out: &mut Vec<Out>) {
         if self.need_break {
             out.push(Out::Text("\n".into()));

@@ -77,6 +77,13 @@ pub struct Settings {
     /// Crew mode on Windows: "git-bash" (firstmate-for-windows, the default when Git for
     /// Windows is installed) or "wsl".
     pub crew_shell: Option<String>,
+    /// Crew mode: false passes messages to a separately running first mate (fm-inbox
+    /// notes) instead of her being the first mate herself. Default: true.
+    pub crew_direct: Option<bool>,
+    /// Crew mode: Claude Code permission mode for the first mate. Default: auto.
+    pub crew_permission_mode: Option<String>,
+    /// Crew mode: the first mate's Claude Code session, resumed across app runs.
+    pub crew_session: Option<String>,
     /// Crew mode: WSL distribution firstmate runs in. Default: WSL's default distribution.
     pub crew_distro: Option<String>,
     /// Crew mode: the firstmate home inside WSL. Default: ~/firstmate.
