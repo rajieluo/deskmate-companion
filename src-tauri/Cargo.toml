@@ -12,10 +12,13 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+ort = { version = "=2.0.0-rc.9", default-features = false, features = ["load-dynamic"] }
+ort-sys = { version = "=2.0.0-rc.9", default-features = false }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-window-state = "2"
 tauri-plugin-log = "2"
+tauri-plugin-single-instance = "2"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -26,3 +29,7 @@ keyring = { version = "3", features = ["windows-native", "apple-native", "linux-
 tauri-plugin-global-shortcut = "2"
 whisper-rs = "0.16"
 tokio = { version = "1", features = ["sync", "process", "io-util"] }
+
+[target.'cfg(windows)'.dependencies]
+# DirectML lets the native voice run on the GPU (settings voice_device "gpu").
+ort = { version = "=2.0.0-rc.9", default-features = false, features = ["load-dynamic", "directml"] }

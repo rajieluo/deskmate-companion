@@ -19,7 +19,7 @@ const DEFAULT_MODEL: &[&str] = &["live2d models", "1014100aqua", "1014100.model3
 #[serde(default)]
 pub struct Settings {
     pub model_path: Option<PathBuf>,
-    /// What the character calls itself. Default: "Aqua".
+    /// What the character calls itself. Default: taken from the model's folder name.
     pub character_name: Option<String>,
     /// Claude model id. Default: claude-opus-5-5.
     pub chat_model: Option<String>,
@@ -33,6 +33,12 @@ pub struct Settings {
     pub voice: Option<String>,
     /// Speaking speed, 0.5 to 2. Default: 1.
     pub voice_speed: Option<f32>,
+    /// Where Kokoro runs: "cpu" (default, reliable) or "gpu" (DirectML in the app;
+    /// WebGPU in the slower built-in voice, which garbles on some graphics drivers).
+    pub voice_device: Option<String>,
+    /// Voice model variant for the native voice: q8 (default, ~90 MB), q8f16,
+    /// fp16 or fp32 (~325 MB). Whichever runs fastest on this CPU.
+    pub voice_model: Option<String>,
     /// Whisper model for voice input: tiny.en, base.en (default), small.en, medium.en, or multilingual ones.
     pub stt_model: Option<String>,
     /// "api" (default): chat through the Claude API with an API key.
@@ -44,6 +50,27 @@ pub struct Settings {
     pub claude_code_permission_mode: Option<String>,
     /// Spoken language code for voice input, e.g. "en" (default) or "auto" with a multilingual model.
     pub stt_language: Option<String>,
+    /// Per-model overrides for which parameters follow the mouse, keyed by the
+    /// model's folder name, e.g. {"xch003_01": {"angle_x": "Param12"}}. Keys:
+    /// angle_x, angle_y, angle_z, eye_x, eye_y, body_x. Use "" to turn one off.
+    pub look_params: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Per-model parameter values held every frame, keyed by folder name, e.g.
+    /// {"Nicole": {"MouthJawOpen": 0}}. Lip sync still moves the mouth while speaking.
+    pub model_params: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Global hotkeys, e.g. {"talk": "Ctrl+Shift+Space", "listen": "Ctrl+Alt+M", "mute": "Ctrl+Alt+U"}.
+    /// Use "" to turn one off.
+    pub hotkeys: Option<std::collections::HashMap<String, String>>,
+    /// Fade out the bottom edge of the figure. Default: true.
+    pub fade_bottom: Option<bool>,
+    /// Head and eyes follow the mouse cursor. Default: true.
+    pub follow_mouse: Option<bool>,
+    /// Voice picked in the tray for a model, keyed by folder name, e.g. {"Nicole": "af_nicole"}.
+    /// Wins over the folder's own voice.txt / persona.md and over `voice`.
+    pub model_voices: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Last good size of the main window in logical pixels, [width, height].
+    /// Saved here rather than by the window-state plugin, which on Windows could
+    /// save the 160x28 minimized size.
+    pub window_size: Option<[f64; 2]>,
 }
 
 #[derive(Clone, Serialize)]
@@ -55,6 +82,10 @@ pub struct ModelInfo {
     /// Bumped on every model change; used as the first URL segment so the
     /// webview never serves a cached file from a previous model.
     pub generation: u64,
+    /// This model's entry from `look_params`, if any.
+    pub look: Option<serde_json::Value>,
+    /// This model's entry from `model_params`, if any.
+    pub params: Option<serde_json::Value>,
 }
 
 struct Inner {
@@ -94,11 +125,72 @@ impl ModelStore {
     pub fn current(&self) -> Option<ModelInfo> {
         let inner = self.inner.lock().unwrap();
         let path = inner.settings.model_path.as_ref()?;
+        let folder = path.parent().and_then(|p| p.file_name()).map(|f| f.to_string_lossy().into_owned());
+        let look = inner.settings.look_params.as_ref().zip(folder.clone()).and_then(|(m, f)| m.get(&f).cloned());
+        let params = inner.settings.model_params.as_ref().zip(folder).and_then(|(m, f)| m.get(&f).cloned());
         Some(ModelInfo {
             file_name: path.file_name()?.to_string_lossy().into_owned(),
             path: path.display().to_string(),
             generation: inner.generation,
+            look,
+            params,
         })
+    }
+
+    /// What the character is called: `character_name` if set, else the model folder's name.
+    pub fn character_name(&self) -> String {
+        let s = self.settings();
+        s.character_name
+            .filter(|n| !n.trim().is_empty())
+            .or_else(|| {
+                let folder = s.model_path.as_ref()?.parent()?.file_name()?.to_string_lossy().into_owned();
+                name_from_folder(&folder)
+            })
+            .unwrap_or_else(|| "Assistant".into())
+    }
+
+    /// Name of the current model's folder.
+    pub fn folder_name(&self) -> Option<String> {
+        let s = self.settings();
+        Some(s.model_path.as_ref()?.parent()?.file_name()?.to_string_lossy().into_owned())
+    }
+
+    /// The voice for the current model and whether it was picked in the tray:
+    /// the tray pick, else the folder's own voice, else `voice`, else af_heart.
+    pub fn voice(&self) -> (String, bool) {
+        let s = self.settings();
+        if let Some(v) = self
+            .folder_name()
+            .and_then(|f| s.model_voices.as_ref()?.get(&f)?.as_str().map(str::to_string))
+            .filter(|v| crate::voices::is_voice(v))
+        {
+            return (v, true);
+        }
+        let v = self
+            .current_dir()
+            .and_then(|d| crate::voices::folder_voice(&d))
+            .or(s.voice.filter(|v| !v.trim().is_empty()))
+            .unwrap_or_else(|| crate::voices::DEFAULT.into());
+        (v, false)
+    }
+
+    /// Picks (Some) or clears (None) the tray voice for the current model.
+    pub fn pick_voice(&self, voice: Option<&str>) {
+        let folder = self.folder_name();
+        self.update(|s| match folder {
+            Some(f) => {
+                let map = s.model_voices.get_or_insert_with(Default::default);
+                match voice {
+                    Some(v) => {
+                        map.insert(f, v.into());
+                    }
+                    None => {
+                        map.remove(&f);
+                    }
+                }
+            }
+            None => s.voice = voice.map(str::to_string),
+        });
     }
 
     /// The folder holding the current model's .model3.json.
@@ -153,6 +245,39 @@ impl ModelStore {
     }
 }
 
+/// Motion and expression files in a model folder (relative paths with "/"), so
+/// files the .model3.json doesn't list (common with VTube Studio models) can be
+/// offered too. Looks three folders deep and stops at 500 files.
+pub fn list_model_files(dir: &Path) -> Vec<String> {
+    fn walk(root: &Path, dir: &Path, depth: u32, out: &mut Vec<String>) {
+        let Ok(entries) = fs::read_dir(dir) else { return };
+        let mut entries: Vec<_> = entries.flatten().collect();
+        entries.sort_by_key(|e| e.file_name());
+        for e in entries {
+            if out.len() >= 500 {
+                return;
+            }
+            let path = e.path();
+            if path.is_dir() {
+                if depth < 3 {
+                    walk(root, &path, depth + 1, out);
+                }
+                continue;
+            }
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            if name.ends_with(".motion3.json") || name.ends_with(".exp3.json") {
+                if let Ok(rel) = path.strip_prefix(root) {
+                    let parts: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+                    out.push(parts.join("/"));
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, dir, 0, &mut out);
+    out
+}
+
 /// Maps a request path onto a file inside `dir`, refusing anything that escapes it.
 pub fn resolve(dir: &Path, uri_path: &str) -> Option<PathBuf> {
     let trimmed = uri_path.trim_start_matches('/');
@@ -187,6 +312,8 @@ fn respond(status: StatusCode, mime: &str, body: Vec<u8>) -> Response<Vec<u8>> {
         .header(header::CONTENT_TYPE, mime)
         // The page (tauri.localhost) and model.localhost are different origins.
         .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+        // The page is cross-origin isolated (for multi-threaded voice).
+        .header("Cross-Origin-Resource-Policy", "cross-origin")
         .body(body)
         .expect("valid response")
 }
@@ -203,6 +330,16 @@ mod tests {
         fs::write(dir.join(".physics3.json"), "{}").unwrap();
         fs::write(dir.parent().unwrap().join("secret.txt"), "x").unwrap();
         dir
+    }
+
+    #[test]
+    fn lists_motion_and_expression_files() {
+        let dir = temp_model();
+        fs::write(dir.join("Love eye.exp3.json"), "{}").unwrap();
+        let files = list_model_files(&dir);
+        assert!(files.contains(&"motions/00_Wait_01.motion3.json".to_string()), "{files:?}");
+        assert!(files.contains(&"Love eye.exp3.json".to_string()), "{files:?}");
+        assert!(!files.iter().any(|f| f.ends_with("model3.json") && !f.ends_with("motion3.json")));
     }
 
     #[test]
@@ -223,5 +360,37 @@ mod tests {
         assert!(resolve(&dir, "/3//etc/passwd").is_none());
         assert!(resolve(&dir, "/3/missing.json").is_none());
         assert!(resolve(&dir, "/no-generation").is_none());
+    }
+}
+
+/// A display name from a model folder name: "1014100aqua" -> "Aqua", "Nicole" -> "Nicole",
+/// "mori_suit" -> "Mori Suit", "weixi_2" -> "Weixi", "l2d01.u" -> "L2d01".
+pub fn name_from_folder(folder: &str) -> Option<String> {
+    let base = folder.strip_suffix(".u").unwrap_or(folder);
+    let base = base.trim_start_matches(|c: char| c.is_ascii_digit());
+    let words: Vec<String> = base
+        .split(|c: char| c == '_' || c == '-' || c == ' ' || c == '.')
+        .filter(|w| !w.is_empty() && !w.chars().all(|c| c.is_ascii_digit()))
+        .map(|w| {
+            let mut cs = w.chars();
+            cs.next().map(|f| f.to_uppercase().chain(cs).collect()).unwrap_or_default()
+        })
+        .collect();
+    (!words.is_empty()).then(|| words.join(" "))
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::name_from_folder;
+
+    #[test]
+    fn names_from_folders() {
+        assert_eq!(name_from_folder("1014100aqua").as_deref(), Some("Aqua"));
+        assert_eq!(name_from_folder("Nicole").as_deref(), Some("Nicole"));
+        assert_eq!(name_from_folder("jane").as_deref(), Some("Jane"));
+        assert_eq!(name_from_folder("mori_suit").as_deref(), Some("Mori Suit"));
+        assert_eq!(name_from_folder("weixi_2").as_deref(), Some("Weixi"));
+        assert_eq!(name_from_folder("l2d01.u").as_deref(), Some("L2d01"));
+        assert_eq!(name_from_folder("12345"), None);
     }
 }

@@ -17,6 +17,9 @@ export class ChatUI {
   private keyForm = $<HTMLFormElement>("api-key");
   private keyInput = $<HTMLInputElement>("api-key-input");
   private micButton = $<HTMLButtonElement>("mic");
+  private muteButton = $<HTMLButtonElement>("mute");
+  private historyButton = $<HTMLButtonElement>("history-btn");
+  private hotkeys = { talk: "", listen: "", mute: "" };
   private mic = new Mic();
   private transcribing = false;
   /** The reply being shown; 0 while a send is in flight and its number isn't known yet. */
@@ -26,7 +29,7 @@ export class ChatUI {
   private tags = new TagStream();
   private sentences = new SentenceBuffer();
   private hideTimer: number | undefined;
-  private name = "Aqua";
+  private name = "Assistant";
 
   constructor(
     private avatar: Avatar,
@@ -43,6 +46,14 @@ export class ChatUI {
     host.onEvent("chat-reset", () => this.say("(I've forgotten our conversation.)", 4000));
     host.onEvent("start-listening", () => void this.listen());
     host.onSttProgress((p) => this.say(`Downloading the speech model (first time only)… ${Math.floor(p)}%`));
+    this.muteButton.addEventListener("click", () => host.setVoiceEnabled(!this.voice.enabled));
+    host.onVoiceChanged((on) => this.showMuted(!on));
+    void host.chatStatus().then((s) => {
+      this.hotkeys = s.hotkeys;
+      this.micButton.title = s.hotkeys.listen ? `Speak (${s.hotkeys.listen})` : "Speak";
+      this.showMuted(!s.voice_enabled);
+    });
+    this.historyButton.addEventListener("click", () => host.historyOpen());
     this.micButton.addEventListener("click", () => {
       if (this.mic.recording) this.mic.stop();
       else void this.listen();
@@ -66,10 +77,14 @@ export class ChatUI {
       this.say("Thanks! Say something to me.", 5000);
       this.open();
     });
-    void host.chatStatus().then((s) => {
-      this.name = s.name;
-      this.setMode(s.brain);
-    });
+    const refreshName = () =>
+      void host.chatStatus().then((s) => {
+        this.name = s.name;
+        this.setMode(s.brain);
+      });
+    refreshName();
+    // The name comes from the model's folder, so a new model can mean a new name.
+    host.onModelChanged(() => refreshName());
     host.onModelPicked((model) => this.say(`Chat model: ${model}`, 3000));
     host.onBrainChanged((brain) => {
       this.setMode(brain);
@@ -156,6 +171,7 @@ export class ChatUI {
       this.askForKey();
       return;
     }
+    host.historyAppend("user", text);
     this.tags = new TagStream();
     this.sentences = new SentenceBuffer();
     this.voice.stop();
@@ -200,6 +216,7 @@ export class ChatUI {
     this.append(rest);
     for (const s of [...this.sentences.push(rest), ...this.sentences.flush()]) this.voice.say(speakable(s));
     this.bubble.classList.remove("thinking");
+    host.historyAppend("assistant", this.bubbleText.textContent ?? "");
     const words = (this.bubbleText.textContent ?? "").split(/\s+/).length;
     this.scheduleHide(Math.min(30000, 5000 + words * 350));
   }
@@ -269,6 +286,13 @@ export class ChatUI {
   /** Shows a status line (e.g. voice download progress); empty text hides it. */
   status(text: string) {
     if (text) this.say(text, 4000);
+  }
+
+  private showMuted(muted: boolean) {
+    this.muteButton.classList.toggle("muted", muted);
+    this.muteButton.setAttribute("aria-pressed", String(muted));
+    const key = this.hotkeys.mute ? ` (${this.hotkeys.mute})` : "";
+    this.muteButton.title = `${muted ? "Unmute" : "Mute"} her voice${key}`;
   }
 
   get characterName() {

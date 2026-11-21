@@ -1,5 +1,6 @@
 import { Avatar } from "./avatar";
 import { ChatUI } from "./chat";
+import { PosePicker } from "./picker";
 import * as host from "./host";
 import { EMOTIONS } from "./motions";
 import { BeepEngine, KokoroEngine, Voice } from "./voice";
@@ -15,14 +16,27 @@ const useBeep = !host.inTauri && new URLSearchParams(location.search).get("tts")
 const voice = new Voice(useBeep ? new BeepEngine() : kokoro);
 avatar.setMouthSource(() => voice.level());
 (window as unknown as { voice: Voice }).voice = voice;
+const poses = new PosePicker(avatar);
 const chat = new ChatUI(avatar, voice);
 kokoro.onStatus = (s) => chat.status(s);
 void host.chatStatus().then((s) => {
   voice.enabled = s.voice_enabled;
+  avatar.setFollowMouse(s.follow_mouse);
+  avatar.setFade(s.fade_bottom);
   kokoro.voice = s.voice;
   kokoro.speed = s.voice_speed;
+  kokoro.device = s.voice_device === "gpu" ? "gpu" : "cpu";
   // Start the (large, first-time) model download early instead of on the first reply.
   if (s.voice_enabled && !useBeep) kokoro.warmUp();
+});
+host.onFollowMouseChanged((on) => avatar.setFollowMouse(on));
+host.onFadeBottomChanged((on) => avatar.setFade(on));
+host.onVoicePicked((id, sample) => {
+  kokoro.voice = id;
+  if (sample && voice.enabled) {
+    voice.stop();
+    voice.say("Hi! This is how I sound now.");
+  }
 });
 host.onVoiceChanged((on) => {
   voice.enabled = on;
@@ -40,6 +54,9 @@ function showStatus(text: string | null, { pick = false } = {}) {
   statusBox.toggleAttribute("data-hit", text !== null);
 }
 
+window.addEventListener("error", (e) => host.log("error", `[page] ${e.message} at ${e.filename}:${e.lineno}`));
+window.addEventListener("unhandledrejection", (e) => host.log("error", `[page] unhandled: ${String(e.reason?.stack ?? e.reason)}`));
+
 async function load(source: host.ModelSource | null) {
   if (!("Live2DCubismCore" in window)) {
     showStatus(
@@ -53,13 +70,17 @@ async function load(source: host.ModelSource | null) {
   }
   showStatus("Loading model…");
   try {
-    const summary = await avatar.load(source.url);
+    const files = await host.modelFiles();
+    const summary = await avatar.load(source.url, source.look, source.params, files);
+    await poses.restore(source.label);
     showStatus(null);
-    console.info("[avatar] loaded", source.label, summary);
+    host.log("info", `[avatar] loaded ${source.label}: ${JSON.stringify(summary)}; look ${JSON.stringify(avatar.lookParams)}`);
+    // A second later, once idle motions have started, record the mouth state.
+    setTimeout(() => void avatar.diagnostics().then((d) => host.log("info", `[avatar] ${d}`)), 1500);
     document.body.dataset.ready = "true";
   } catch (err) {
     if ((err as Error).message === "superseded") return;
-    console.error(err);
+    host.log("error", `[avatar] couldn't load ${source.label}: ${(err as Error).message}`);
     showStatus(`Couldn't load ${source.label}\n${(err as Error).message}`, { pick: true });
   }
 }

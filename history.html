@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chat history</title>
+    <link rel="stylesheet" href="/src/history.css" />
+  </head>
+  <body>
+    <header>
+      <input id="search" type="search" placeholder="Search…" autocomplete="off" />
+      <button id="refresh" type="button">Refresh</button>
+      <button id="clear" type="button">Clear…</button>
+    </header>
+    <main id="log" aria-live="polite"></main>
+    <script type="module" src="/src/history.ts"></script>
+  </body>
+</html>
