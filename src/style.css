@@ -69,7 +69,17 @@ body {
   white-space: pre-wrap;
 }
 
-#bubble.thinking p::after {
+#bubble-activity {
+  margin-top: 6px !important;
+  color: #6b7090;
+  font-size: 12px;
+}
+
+body[data-brain="claude_code"] #chat input {
+  border-color: #d97757;
+}
+
+#bubble.thinking #bubble-text::after {
   content: "…";
   animation: blink 1s steps(2) infinite;
 }

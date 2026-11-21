@@ -21,6 +21,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          # Bump when the ggml build flags in .cargo/config.toml change, so whisper.cpp is rebuilt.
+          prefix-key: v1-ggml-portable
 
       - name: Install (downloads Live2D Cubism Core)
         run: npm ci

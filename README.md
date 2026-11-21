@@ -38,6 +38,18 @@ Every pull request also builds a Windows installer in CI; download it from the r
 - **Ctrl + mouse wheel** over her makes the window bigger or smaller.
 - **Keys 1 to 7** (after clicking her) play happy, sad, angry, surprised, shy, thinking and proud, so you can check a model's motions.
 
+## Claude Code mode
+
+Instead of plain chat, she can be a voice and face for [Claude Code](https://claude.com/claude-code) working in a folder of yours (a code project, notes, anything).
+
+1. Install Claude Code and run `claude` once in a terminal to sign in. This mode uses that login (your Claude subscription), not an API key.
+2. In the tray, pick **Claude Code folder…** and choose the folder. That switches on **Claude Code mode** (toggle it in the tray to go back to normal chat).
+3. Talk or type as usual: "what does this project do?", "add a test for the parser", "fix the failing build".
+
+Each message runs `claude -p` in that folder and continues the same Claude Code session until you pick *Forget conversation*. While it works, the bubble shows what it's doing ("Reading main.ts…", "Running npm test…"), and the reply is spoken and drives her emotions like in normal chat.
+
+Permissions: there is no one to click "Allow" in this mode, so it runs with `acceptEdits` by default. Claude Code can read and edit files in the folder, but shell commands outside its safe list are refused. Change `claude_code_permission_mode` in `settings.json` to `auto` (lets Claude Code's classifier allow safe commands) or another mode if you want more.
+
 ## Chat settings
 
 Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistant\` (created on first run). Edit it while the app is closed:
@@ -53,17 +65,29 @@ Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistan
   "voice": "af_heart",
   "voice_speed": 1.0,
   "stt_model": "base.en",
-  "stt_language": "en"
+  "stt_language": "en",
+  "brain": "api",
+  "claude_code_folder": null,
+  "claude_code_permission_mode": "acceptEdits"
 }
 ```
 
-- `chat_model`: any Claude model id. The default is Claude Opus 5.5. `claude-haiku-5-5` is much cheaper and faster if replies are good enough for you.
+- `chat_model`: any Claude model id. The tray's **Chat model** submenu switches between Opus 5.5, Sonnet 5.5 and Haiku 5.5 without editing the file. The default is Claude Opus 5.5. `claude-haiku-5-5` is much cheaper and faster if replies are good enough for you.
 - `chat_effort`: `low` (default, quick chatty replies), `medium`, `high`, `xhigh` or `max`.
 - `voice_enabled`, `voice`, `voice_speed`: speech on or off, the Kokoro voice (`af_heart` by default; also `af_bella`, `af_nicole`, `af_sky`, `bf_emma` and [others](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md)) and speed (0.5 to 2).
 - `stt_model`, `stt_language`: the Whisper model for voice input (`tiny.en`, `base.en` by default, `small.en` for better accuracy, or multilingual `small` with `"stt_language": "auto"`) and the spoken language.
 - `persona`: replaces the built-in personality prompt. Keep the line asking for one emotion tag per reply (`[happy] [sad] [angry] [surprised] [shy] [thinking] [proud] [neutral]`), since the tags are what make her move.
 
 Claude starts each reply with an emotion tag such as `[happy]`. The app strips the tags from the text and plays the matching motion. The API call is made from the Rust side, so the key never reaches the web page. Server-side refusal fallbacks are turned on, so if Claude Opus 5.5 declines a message the API retries it on a fallback model in the same call.
+
+## If something goes wrong
+
+The app writes a log to `%LOCALAPPDATA%\com.rajieluo.desktopassistant\logs\Desktop Assistant.log`.
+If it closes without a message, Windows also records the crash: open Event Viewer, go to
+Windows Logs > Application, and look for an "Application Error" for `desktop-assistant.exe`.
+The exception code there (for example `0xc000001d`, an illegal instruction) says what kind of crash it was.
+
+Speech input needs a CPU with AVX2 (most PCs from 2015 on).
 
 ## Models
 

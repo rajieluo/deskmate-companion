@@ -35,6 +35,13 @@ pub struct Settings {
     pub voice_speed: Option<f32>,
     /// Whisper model for voice input: tiny.en, base.en (default), small.en, medium.en, or multilingual ones.
     pub stt_model: Option<String>,
+    /// "api" (default): chat through the Claude API with an API key.
+    /// "claude_code": run Claude Code in `claude_code_folder` with your Claude Code login.
+    pub brain: Option<String>,
+    /// Folder Claude Code works in.
+    pub claude_code_folder: Option<PathBuf>,
+    /// Claude Code permission mode: acceptEdits (default), auto, manual, bypassPermissions.
+    pub claude_code_permission_mode: Option<String>,
     /// Spoken language code for voice input, e.g. "en" (default) or "auto" with a multilingual model.
     pub stt_language: Option<String>,
 }

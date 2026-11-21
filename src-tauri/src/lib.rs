@@ -10,17 +10,19 @@
 //! * the Claude chat (see `chat.rs`), so the API key never reaches the page.
 
 mod chat;
+mod claude_code;
 mod model;
 mod stt;
 
 use std::{sync::Arc, thread, time::Duration};
 
 use chat::{Chat, ChatConfig};
+use claude_code::ClaudeCode;
 use model::{ModelInfo, ModelStore};
 use stt::Stt;
 use serde::Serialize;
 use tauri::{
-    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::TrayIconBuilder,
     AppHandle, Emitter, Manager, PhysicalPosition, Runtime, State, WebviewWindow,
 };
@@ -28,6 +30,16 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 const DEFAULT_NAME: &str = "Aqua";
+
+/// Models offered in the tray's Model submenu: (menu id, model id, label).
+const MODEL_CHOICES: &[(&str, &str, &str)] = &[
+    ("model:claude-opus-5-5", "claude-opus-5-5", "Claude Opus 5.5 (smartest)"),
+    ("model:claude-sonnet-5-5", "claude-sonnet-5-5", "Claude Sonnet 5.5"),
+    ("model:claude-haiku-5-5", "claude-haiku-5-5", "Claude Haiku 5.5 (fastest, cheapest)"),
+];
+
+/// The Model submenu's items, kept so the check mark can move when one is picked.
+struct ModelMenu<R: Runtime>(Vec<CheckMenuItem<R>>);
 
 #[derive(Clone, Serialize, PartialEq)]
 struct CursorEvent {
@@ -50,6 +62,9 @@ struct ChatStatus {
     voice_enabled: bool,
     voice: String,
     voice_speed: f32,
+    /// "api" or "claude_code"
+    brain: String,
+    claude_code_folder: Option<String>,
 }
 
 #[tauri::command]
@@ -62,6 +77,8 @@ fn chat_status(store: State<'_, Arc<ModelStore>>) -> ChatStatus {
         voice_enabled: s.voice_enabled.unwrap_or(true),
         voice: s.voice.unwrap_or_else(|| "af_heart".into()),
         voice_speed: s.voice_speed.unwrap_or(1.0).clamp(0.5, 2.0),
+        brain: s.brain.unwrap_or_else(|| "api".into()),
+        claude_code_folder: s.claude_code_folder.map(|p| p.display().to_string()),
     }
 }
 
@@ -75,27 +92,80 @@ async fn chat_send<R: Runtime>(
     app: AppHandle<R>,
     chat: State<'_, Arc<Chat>>,
     store: State<'_, Arc<ModelStore>>,
+    code: State<'_, Arc<ClaudeCode>>,
     text: String,
 ) -> Result<u64, String> {
     let s = store.settings();
-    let name = s.character_name.unwrap_or_else(|| DEFAULT_NAME.into());
+    let name = s.character_name.clone().unwrap_or_else(|| DEFAULT_NAME.into());
+    if s.brain.as_deref() == Some("claude_code") {
+        let config = claude_code::RunConfig {
+            folder: s.claude_code_folder.clone().unwrap_or_default(),
+            permission_mode: s
+                .claude_code_permission_mode
+                .clone()
+                .unwrap_or_else(|| claude_code::DEFAULT_PERMISSION_MODE.into()),
+            prompt_file: app.path().app_config_dir().map_err(|e| e.to_string())?.join("avatar-prompt.txt"),
+            name,
+        };
+        let code = code.inner().clone();
+        let turn = code.begin();
+        tauri::async_runtime::spawn(async move { code.run(&app, turn, text, config).await });
+        return Ok(turn);
+    }
     let config = ChatConfig {
         model: s.chat_model.unwrap_or_else(|| chat::DEFAULT_MODEL.into()),
         effort: s.chat_effort.unwrap_or_else(|| chat::DEFAULT_EFFORT.into()),
         persona: s.persona.unwrap_or_else(|| chat::default_persona(&name)),
     };
+    // Return the turn number right away and stream in the background. (Awaiting the
+    // whole reply here meant the page learned the turn only after every event had
+    // already gone by, so it ignored them all and the bubble stayed on "…".)
     let chat = chat.inner().clone();
-    Ok(chat.send(&app, text, config).await)
+    let turn = chat.begin();
+    tauri::async_runtime::spawn(async move { chat.run(&app, turn, text, config).await });
+    Ok(turn)
 }
 
 #[tauri::command]
-fn chat_cancel(chat: State<'_, Arc<Chat>>) {
+fn chat_cancel(chat: State<'_, Arc<Chat>>, code: State<'_, Arc<ClaudeCode>>) {
     chat.cancel();
+    code.cancel();
 }
 
 #[tauri::command]
-fn chat_reset(chat: State<'_, Arc<Chat>>) {
+fn chat_reset(chat: State<'_, Arc<Chat>>, code: State<'_, Arc<ClaudeCode>>) {
     chat.reset();
+    code.reset();
+}
+
+/// Lets the user pick the folder Claude Code works in, and switches to Claude Code mode.
+#[tauri::command]
+async fn pick_claude_code_folder<R: Runtime>(app: AppHandle<R>) -> Result<Option<String>, String> {
+    choose_claude_code_folder(&app)
+}
+
+fn choose_claude_code_folder<R: Runtime>(app: &AppHandle<R>) -> Result<Option<String>, String> {
+    let store = app.state::<Arc<ModelStore>>();
+    let mut dialog = app.dialog().file().set_title("Choose the folder Claude Code should work in");
+    if let Some(dir) = store.settings().claude_code_folder {
+        dialog = dialog.set_directory(dir);
+    }
+    let Some(picked) = dialog.blocking_pick_folder() else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|e| e.to_string())?;
+    store.update(|s| {
+        s.claude_code_folder = Some(path.clone());
+        s.brain = Some("claude_code".into());
+    });
+    app.state::<Arc<ClaudeCode>>().reset();
+    let _ = app.emit("brain-changed", "claude_code");
+    Ok(Some(path.display().to_string()))
+}
+
+fn set_brain<R: Runtime>(app: &AppHandle<R>, brain: &str) {
+    app.state::<Arc<ModelStore>>().update(|s| s.brain = Some(brain.into()));
+    let _ = app.emit("brain-changed", brain);
 }
 
 fn stt_settings<R: Runtime>(app: &AppHandle<R>) -> Result<(String, String, std::path::PathBuf), String> {
@@ -109,8 +179,9 @@ fn stt_settings<R: Runtime>(app: &AppHandle<R>) -> Result<(String, String, std::
 /// Downloads the Whisper model ahead of time (no-op when it's already there).
 #[tauri::command]
 async fn stt_prepare<R: Runtime>(app: AppHandle<R>, stt: State<'_, Arc<Stt>>) -> Result<(), String> {
+    stt::check_cpu()?;
     let (name, _, dir) = stt_settings(&app)?;
-    stt.ensure_model(&app, &dir, &name).await.map(|_| ())
+    stt.ensure_model(&app, &dir, &name).await.map(|_| ()).inspect_err(|e| log::error!("speech model: {e}"))
 }
 
 /// Transcribes raw 16 kHz mono f32 samples sent as the request body.
@@ -123,13 +194,15 @@ async fn transcribe<R: Runtime>(
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("expected raw audio bytes".into());
     };
+    stt::check_cpu()?;
     let samples = stt::samples_from_bytes(bytes);
     let (name, language, dir) = stt_settings(&app)?;
-    let path = stt.ensure_model(&app, &dir, &name).await?;
+    let path = stt.ensure_model(&app, &dir, &name).await.inspect_err(|e| log::error!("speech model: {e}"))?;
     let stt = stt.inner().clone();
     tauri::async_runtime::spawn_blocking(move || stt.transcribe(&name, &path, &samples, &language))
         .await
         .map_err(|e| e.to_string())?
+        .inspect_err(|e| log::error!("transcribe: {e}"))
 }
 
 /// Brings the window forward and opens the chat box.
@@ -214,12 +287,29 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let key = MenuItem::with_id(app, "key", "Set API key…", true, None::<&str>)?;
     let voice_on = app.state::<Arc<ModelStore>>().settings().voice_enabled.unwrap_or(true);
     let voice = CheckMenuItem::with_id(app, "voice", "Speak replies", true, voice_on, None::<&str>)?;
+    let code_on = app.state::<Arc<ModelStore>>().settings().brain.as_deref() == Some("claude_code");
+    let code = CheckMenuItem::with_id(app, "code", "Claude Code mode", true, code_on, None::<&str>)?;
+    let code_folder = MenuItem::with_id(app, "code_folder", "Claude Code folder…", true, None::<&str>)?;
+    let sep3 = PredefinedMenuItem::separator(app)?;
+    let current_model = app
+        .state::<Arc<ModelStore>>()
+        .settings()
+        .chat_model
+        .unwrap_or_else(|| chat::DEFAULT_MODEL.into());
+    let mut model_items = Vec::new();
+    for (id, model, label) in MODEL_CHOICES {
+        model_items.push(CheckMenuItem::with_id(app, *id, *label, true, current_model == *model, None::<&str>)?);
+    }
+    let model_refs: Vec<&dyn tauri::menu::IsMenuItem<R>> =
+        model_items.iter().map(|i| i as &dyn tauri::menu::IsMenuItem<R>).collect();
+    let model_menu = Submenu::with_items(app, "Chat model", true, &model_refs)?;
+    app.manage(ModelMenu(model_items.clone()));
     let reload = MenuItem::with_id(app, "reload", "Reload", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let menu =
-        Menu::with_items(app, &[&talk, &listen, &voice, &forget, &key, &sep, &choose, &reset, &reload, &sep2, &quit])?;
+        Menu::with_items(app, &[&talk, &listen, &voice, &forget, &sep3, &model_menu, &code, &code_folder, &key, &sep, &choose, &reset, &reload, &sep2, &quit])?;
 
     let mut tray = TrayIconBuilder::with_id("main")
         .tooltip("Desktop Assistant")
@@ -246,6 +336,26 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 store.update(|s| s.voice_enabled = Some(on));
                 let _ = app.emit("voice-changed", on);
             }
+            "code" => {
+                let store = app.state::<Arc<ModelStore>>();
+                let s = store.settings();
+                if s.brain.as_deref() == Some("claude_code") {
+                    set_brain(app, "api");
+                } else if s.claude_code_folder.as_ref().is_some_and(|f| f.is_dir()) {
+                    set_brain(app, "claude_code");
+                } else {
+                    let app = app.clone();
+                    thread::spawn(move || {
+                        let _ = choose_claude_code_folder(&app);
+                    });
+                }
+            }
+            "code_folder" => {
+                let app = app.clone();
+                thread::spawn(move || {
+                    let _ = choose_claude_code_folder(&app);
+                });
+            }
             "key" => {
                 open_chat(app);
                 let _ = app.emit("open-api-key", ());
@@ -261,6 +371,16 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 }
             }
             "quit" => app.exit(0),
+            id if id.starts_with("model:") => {
+                let model = id.trim_start_matches("model:").to_string();
+                app.state::<Arc<ModelStore>>().update(|s| s.chat_model = Some(model.clone()));
+                if let Some(menu) = app.try_state::<ModelMenu<R>>() {
+                    for (item, (item_id, _, _)) in menu.0.iter().zip(MODEL_CHOICES) {
+                        let _ = item.set_checked(*item_id == id);
+                    }
+                }
+                let _ = app.emit("model-picked", model);
+            }
             _ => {}
         });
     if let Some(icon) = app.default_window_icon() {
@@ -273,6 +393,14 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Log file: %LOCALAPPDATA%\com.rajieluo.desktopassistant\logs\Desktop Assistant.log on Windows.
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .max_file_size(2_000_000)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(
@@ -293,6 +421,12 @@ pub fn run() {
             thread::spawn(move || responder.respond(store.serve(request.uri().path())));
         })
         .setup(|app| {
+            let default_hook = std::panic::take_hook();
+            std::panic::set_hook(Box::new(move |info| {
+                log::error!("panic: {info}");
+                default_hook(info);
+            }));
+            log::info!("Desktop Assistant {} starting; {}", env!("CARGO_PKG_VERSION"), stt::cpu_summary());
             let config_dir = app.path().app_config_dir()?;
             let first_run = !config_dir.join("settings.json").exists();
             let documents = app.path().document_dir().ok();
@@ -301,12 +435,13 @@ pub fn run() {
             store.save();
             app.manage(store);
             app.manage(Arc::new(Chat::default()));
+            app.manage(Arc::new(ClaudeCode::default()));
 
             let talk = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
             let listen = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyM);
             for shortcut in [talk, listen] {
                 if let Err(e) = app.global_shortcut().register(shortcut) {
-                    eprintln!("could not register {shortcut:?}: {e}");
+                    log::warn!("could not register {shortcut:?}: {e}");
                 }
             }
             app.manage(Arc::new(Stt::default()));
@@ -330,6 +465,7 @@ pub fn run() {
             chat_cancel,
             chat_reset,
             stt_prepare,
+            pick_claude_code_folder,
             transcribe
         ])
         .run(tauri::generate_context!())

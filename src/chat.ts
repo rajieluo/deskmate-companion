@@ -11,6 +11,7 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 export class ChatUI {
   private bubble = $<HTMLDivElement>("bubble");
   private bubbleText = $<HTMLParagraphElement>("bubble-text");
+  private activity = $<HTMLParagraphElement>("bubble-activity");
   private form = $<HTMLFormElement>("chat");
   private input = $<HTMLInputElement>("chat-input");
   private keyForm = $<HTMLFormElement>("api-key");
@@ -18,7 +19,10 @@ export class ChatUI {
   private micButton = $<HTMLButtonElement>("mic");
   private mic = new Mic();
   private transcribing = false;
+  /** The reply being shown; 0 while a send is in flight and its number isn't known yet. */
   private turn = 0;
+  /** Lowest turn number the in-flight send can have (older turns are stale). */
+  private floor = 1;
   private tags = new TagStream();
   private sentences = new SentenceBuffer();
   private hideTimer: number | undefined;
@@ -29,9 +33,10 @@ export class ChatUI {
     private voice: Voice,
   ) {
     host.onChat({
-      delta: (turn, text) => turn === this.turn && this.onDelta(text),
-      done: (turn) => turn === this.turn && this.onDone(),
-      error: (turn, kind, message) => turn === this.turn && this.onError(kind, message),
+      delta: (turn, text) => this.accept(turn) && this.onDelta(text),
+      done: (turn) => this.accept(turn) && this.onDone(),
+      activity: (turn, text) => this.accept(turn) && this.onActivity(text),
+      error: (turn, kind, message) => this.accept(turn) && this.onError(kind, message),
     });
     host.onEvent("open-chat", () => this.open());
     host.onEvent("open-api-key", () => this.askForKey());
@@ -63,7 +68,17 @@ export class ChatUI {
     });
     void host.chatStatus().then((s) => {
       this.name = s.name;
-      this.input.placeholder = `Talk to ${s.name}…`;
+      this.setMode(s.brain);
+    });
+    host.onModelPicked((model) => this.say(`Chat model: ${model}`, 3000));
+    host.onBrainChanged((brain) => {
+      this.setMode(brain);
+      this.say(
+        brain === "claude_code"
+          ? "Claude Code mode: I'll work in your folder with Claude Code."
+          : "Back to normal chat.",
+        4000,
+      );
     });
   }
 
@@ -130,9 +145,14 @@ export class ChatUI {
     }
   }
 
+  private setMode(brain: string) {
+    document.body.dataset.brain = brain;
+    this.input.placeholder = brain === "claude_code" ? `Ask ${this.name} to code…` : `Talk to ${this.name}…`;
+  }
+
   async send(text: string) {
     const status = await host.chatStatus();
-    if (!status.has_key) {
+    if (status.brain === "api" && !status.has_key) {
       this.askForKey();
       return;
     }
@@ -141,8 +161,18 @@ export class ChatUI {
     this.voice.stop();
     this.say("…");
     this.bubbleText.textContent = "";
+    this.activity.hidden = true;
     this.bubble.classList.add("thinking");
-    this.turn = await host.chatSend(text);
+    if (this.turn) this.floor = this.turn + 1;
+    this.turn = 0;
+    const turn = await host.chatSend(text);
+    if (this.turn === 0) this.turn = turn;
+  }
+
+  /** Events can arrive before chatSend resolves, so the first one of a new turn claims it. */
+  private accept(turn: number): boolean {
+    if (this.turn === 0 && turn >= this.floor) this.turn = turn;
+    return turn === this.turn;
   }
 
   private onDelta(chunk: string) {
@@ -155,7 +185,17 @@ export class ChatUI {
     }
   }
 
+  /** Claude Code tool use: shown as a small grey line under the reply. */
+  private onActivity(text: string) {
+    this.activity.textContent = `${text}…`;
+    this.activity.hidden = false;
+    this.bubble.hidden = false;
+    this.bubble.setAttribute("data-hit", "");
+    this.placeBubble();
+  }
+
   private onDone() {
+    this.activity.hidden = true;
     const rest = this.tags.end().text;
     this.append(rest);
     for (const s of [...this.sentences.push(rest), ...this.sentences.flush()]) this.voice.say(speakable(s));
@@ -166,6 +206,12 @@ export class ChatUI {
 
   private onError(kind: string, message: string) {
     this.bubble.classList.remove("thinking");
+    this.activity.hidden = true;
+    if (kind === "no_folder") {
+      this.say("Which folder should I work in?", 6000);
+      void host.pickClaudeCodeFolder();
+      return;
+    }
     if (kind === "cancelled") return;
     if (kind === "no_key" || kind === "auth") {
       this.askForKey(kind === "auth" ? "That API key didn't work." : undefined);

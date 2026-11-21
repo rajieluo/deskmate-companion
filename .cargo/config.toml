@@ -1,0 +1,12 @@
+# whisper.cpp (ggml) is compiled by whisper-rs-sys with CMake. By default it is
+# tuned for the CPU of the machine that builds it (GGML_NATIVE), and the GitHub
+# runners have AVX-512, so the installer crashed with an illegal instruction on
+# PCs without it the moment speech input loaded the Whisper model. Build for a
+# portable baseline instead: AVX2 + FMA + F16C (Intel Haswell / AMD Zen and newer).
+[env]
+GGML_NATIVE = "OFF"
+GGML_AVX = "ON"
+GGML_AVX2 = "ON"
+GGML_FMA = "ON"
+GGML_F16C = "ON"
+GGML_AVX512 = "OFF"
