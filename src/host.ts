@@ -1,7 +1,7 @@
 // Everything that talks to the Tauri shell lives here. In a plain browser
 // (`npm run dev` opened directly, or tests) the same calls fall back to
 // browser behaviour so the avatar can be developed without the desktop app.
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { Channel, convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 
@@ -119,6 +119,10 @@ export interface ChatStatus {
   voice_speed: number;
   voice_pitch: number;
   voice_device: string;
+  /** "kokoro" or "pocket" (Pocket TTS, used only when the model has a cloned voice). */
+  voice_engine: string;
+  /** Whether the current model has a voice for Pocket TTS. */
+  pocket_voice: boolean;
   brain: "api" | "claude_code" | "crew";
   claude_code_folder: string | null;
   /** Where the chat box sits: "above", "middle", "below" or a dragged fraction like "0.620". */
@@ -208,7 +212,7 @@ export function log(level: "info" | "warn" | "error", message: string) {
 
 export async function chatStatus(): Promise<ChatStatus> {
   if (!inTauri) {
-    return { hotkeys: { talk: "Ctrl+Shift+Space", listen: "Ctrl+Alt+M", mute: "Ctrl+Alt+U" }, has_key: true, name: "Aqua", model: "demo", voice_enabled: true, follow_mouse: true, fade_bottom: true, voice: "af_heart", voice_speed: 1, voice_pitch: 1, voice_device: "cpu", brain: "api", claude_code_folder: null, toolbar_position: new URLSearchParams(location.search).get("bar") ?? "middle" };
+    return { hotkeys: { talk: "Ctrl+Shift+Space", listen: "Ctrl+Alt+M", mute: "Ctrl+Alt+U" }, has_key: true, name: "Aqua", model: "demo", voice_enabled: true, follow_mouse: true, fade_bottom: true, voice: "af_heart", voice_speed: 1, voice_pitch: 1, voice_device: "cpu", voice_engine: "kokoro", pocket_voice: false, brain: "api", claude_code_folder: null, toolbar_position: new URLSearchParams(location.search).get("bar") ?? "middle" };
   }
   return invoke<ChatStatus>("chat_status");
 }
@@ -306,6 +310,54 @@ export async function ttsSynthesize(ids: number[], style: Float32Array, speed: n
 
 export function onTtsProgress(cb: (percent: number) => void) {
   if (inTauri) void listen<{ percent: number }>("tts-progress", (e) => cb(e.payload.percent));
+}
+
+// --- Pocket TTS (Python sidecar; see src-tauri/src/pocket.rs).
+
+/** Starts Pocket TTS and loads the model's cloned voice. Resolves to the sample rate. */
+export async function pocketPrepare(): Promise<number> {
+  if (!inTauri) throw new Error("Pocket TTS needs the desktop app");
+  return invoke<number>("pocket_prepare");
+}
+
+export interface PocketStats {
+  ms?: number;
+  first_ms?: number;
+  audio_s?: number;
+  cancelled?: boolean;
+}
+
+/**
+ * Speaks one sentence with Pocket TTS, calling `onChunk` with 16-bit PCM as it's
+ * made. Resolves once the last chunk has been handed over.
+ */
+export async function pocketSpeak(text: string, onChunk: (pcm: Int16Array) => void): Promise<PocketStats> {
+  if (!inTauri) throw new Error("Pocket TTS needs the desktop app");
+  let ended: () => void = () => {};
+  const end = new Promise<void>((resolve) => (ended = resolve));
+  const channel = new Channel<ArrayBuffer>();
+  channel.onmessage = (data) => {
+    const bytes = data instanceof ArrayBuffer ? data : new Uint8Array(data as unknown as number[]).buffer;
+    // An empty message marks the end (the reply can arrive before the last chunks).
+    if (!bytes.byteLength) ended();
+    else onChunk(new Int16Array(bytes, 0, bytes.byteLength >> 1));
+  };
+  const stats = await invoke<PocketStats>("pocket_speak", { text, onChunk: channel });
+  await Promise.race([end, new Promise((resolve) => setTimeout(resolve, 2000))]);
+  return stats;
+}
+
+/** Drops the sentences Pocket TTS is still making. */
+export function pocketCancel() {
+  if (inTauri) void invoke("pocket_cancel").catch(() => {});
+}
+
+/** The tray switched voice engine (or the model changed). */
+export function onVoiceEngine(cb: (engine: string, pocketVoice: boolean, sample: boolean) => void) {
+  if (inTauri)
+    void listen<{ engine: string; pocket_voice: boolean; sample: boolean }>("voice-engine", (e) =>
+      cb(e.payload.engine, e.payload.pocket_voice, e.payload.sample),
+    );
 }
 
 // --- Voice input (whisper.cpp on the Rust side; see src-tauri/src/stt.rs).

@@ -5,7 +5,7 @@ import { PosePicker } from "./picker";
 import * as host from "./host";
 import { Toolbar } from "./toolbar";
 import { EMOTIONS } from "./motions";
-import { BeepEngine, KokoroEngine, Voice } from "./voice";
+import { BeepEngine, KokoroEngine, PocketEngine, Voice } from "./voice";
 
 const canvas = document.getElementById("stage") as HTMLCanvasElement;
 const statusBox = document.getElementById("status") as HTMLDivElement;
@@ -15,7 +15,26 @@ const statusPick = document.getElementById("status-pick") as HTMLButtonElement;
 const avatar = new Avatar(canvas);
 const kokoro = new KokoroEngine();
 const useBeep = !host.inTauri && new URLSearchParams(location.search).get("tts") === "beep";
+const pocket = new PocketEngine(kokoro);
 const voice = new Voice(useBeep ? new BeepEngine() : kokoro);
+
+/** Pocket TTS when it's picked and this model has a cloned voice; Kokoro otherwise. */
+function useEngine(engine: string, pocketVoice: boolean, sample = false) {
+  if (useBeep) return;
+  const next = engine === "pocket" && pocketVoice ? pocket : kokoro;
+  if (next === pocket) pocket.reset();
+  if (voice.engine !== next) {
+    voice.stop();
+    voice.engine = next;
+  }
+  if (voice.enabled) {
+    next.warmUp();
+    if (sample) {
+      voice.stop();
+      voice.say("Hi! This is how I sound now.");
+    }
+  }
+}
 avatar.setMouthSource(() => voice.level());
 (window as unknown as { voice: Voice }).voice = voice;
 const poses = new PosePicker(avatar, {
@@ -52,7 +71,7 @@ void host.chatStatus().then((s) => {
   kokoro.pitch = s.voice_pitch;
   kokoro.device = s.voice_device === "gpu" ? "gpu" : "cpu";
   // Start the (large, first-time) model download early instead of on the first reply.
-  if (s.voice_enabled && !useBeep) kokoro.warmUp();
+  useEngine(s.voice_engine, s.pocket_voice);
 });
 host.onFollowMouseChanged((on) => avatar.setFollowMouse(on));
 host.onFadeBottomChanged((on) => avatar.setFade(on));
@@ -66,8 +85,9 @@ host.onVoicePicked((id, sample) => {
 host.onVoiceChanged((on) => {
   voice.enabled = on;
   if (!on) voice.stop();
-  else if (!useBeep) kokoro.warmUp();
+  else if (!useBeep) voice.engine.warmUp?.();
 });
+host.onVoiceEngine((engine, pocketVoice, sample) => useEngine(engine, pocketVoice, sample));
 // Exposed for debugging from the devtools console and for tests.
 (window as unknown as { avatar: Avatar }).avatar = avatar;
 
