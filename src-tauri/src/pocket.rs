@@ -42,10 +42,11 @@ pub const PYTHON_FILE: &str = "python.txt";
 
 /// The Python to run the sidecar with: `pocket_python` from settings if that file
 /// exists, else the one remembered in `pocket/python.txt`, else the default venv
-/// `pocket/venv/Scripts/python.exe` in the data folder. When none exists, returns
-/// the configured path (or the default) so the error names what was looked for.
+/// `pocket/venv/Scripts/python.exe` (`pocket/venv/bin/python` on Linux) in the data
+/// folder. When none exists, returns the configured path (or the default) so the
+/// error names what was looked for.
 pub fn find_python(configured: Option<&Path>, pocket_dir: &Path) -> PathBuf {
-    let default = pocket_dir.join("venv").join("Scripts").join("python.exe");
+    let default = venv_python(&pocket_dir.join("venv"));
     let remembered = std::fs::read_to_string(pocket_dir.join(PYTHON_FILE))
         .ok()
         .map(|s| PathBuf::from(s.trim_start_matches('\u{feff}').trim()))
@@ -56,6 +57,15 @@ pub fn find_python(configured: Option<&Path>, pocket_dir: &Path) -> PathBuf {
         .flatten()
         .find(|p| p.is_file())
         .unwrap_or_else(|| configured.unwrap_or(default))
+}
+
+/// The Python inside a virtual environment.
+pub fn venv_python(venv: &Path) -> PathBuf {
+    if cfg!(windows) {
+        venv.join("Scripts").join("python.exe")
+    } else {
+        venv.join("bin").join("python")
+    }
 }
 
 /// Remembers `python` in `pocket/python.txt` (see `find_python`). Best effort.
@@ -351,10 +361,11 @@ pub fn script_path(resource_dir: &Path) -> PathBuf {
     resource_file(resource_dir, "pocket_server.py")
 }
 
-/// The setup script (resources/setup-pocket.ps1) that installs Python and
-/// pocket-tts into `pocket/venv` in the data folder, where `find_python` looks.
+/// The setup script (resources/setup-pocket.ps1, or setup-pocket.sh on Linux) that
+/// installs Python and pocket-tts into `pocket/venv` in the data folder, where
+/// `find_python` looks.
 pub fn setup_script_path(resource_dir: &Path) -> PathBuf {
-    resource_file(resource_dir, "setup-pocket.ps1")
+    resource_file(resource_dir, if cfg!(windows) { "setup-pocket.ps1" } else { "setup-pocket.sh" })
 }
 
 /// A bundled file: next to the exe when installed, under resources/ in a dev build.
@@ -366,20 +377,26 @@ fn resource_file(resource_dir: &Path, name: &str) -> PathBuf {
     resource_dir.join("resources").join(name)
 }
 
-/// Opens the setup script in its own PowerShell window. Returns at once; the
-/// window stays open until the user closes it.
+/// Opens the setup script in its own console (PowerShell) or terminal window.
+/// Returns at once; the window stays open until the user closes it.
 pub fn open_setup(script: &Path, data_dir: &Path) -> Result<(), String> {
     if !script.is_file() {
         return Err(format!("{} is missing from the app folder", script.display()));
     }
-    let mut cmd = std::process::Command::new("powershell.exe");
-    cmd.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]).arg(script).arg("-DataDir").arg(data_dir);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
+        let mut cmd = std::process::Command::new("powershell.exe");
+        cmd.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]).arg(script).arg("-DataDir").arg(data_dir);
         cmd.creation_flags(0x0000_0010); // CREATE_NEW_CONSOLE
+        cmd.spawn().map(|_| ()).map_err(|e| format!("Couldn't start PowerShell for the Pocket TTS setup: {e}"))
     }
-    cmd.spawn().map(|_| ()).map_err(|e| format!("Couldn't start PowerShell for the Pocket TTS setup: {e}"))
+    #[cfg(not(windows))]
+    {
+        // Run it with bash, so it works even where the bundle didn't keep the exec bit.
+        let args: Vec<std::ffi::OsString> = vec![script.into(), "--data-dir".into(), data_dir.into()];
+        crate::terminal::open(Path::new("bash"), &args, None)
+    }
 }
 
 #[cfg(test)]
@@ -392,7 +409,7 @@ mod tests {
         let pocket_dir = root.join("pocket");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&pocket_dir).unwrap();
-        let default = pocket_dir.join("venv").join("Scripts").join("python.exe");
+        let default = venv_python(&pocket_dir.join("venv"));
         let configured = root.join("bench").join("python.exe");
 
         // Nothing exists: name the configured path, else the default.

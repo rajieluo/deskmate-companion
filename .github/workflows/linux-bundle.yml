@@ -1,0 +1,64 @@
+name: Linux bundle
+
+# Builds the Linux AppImage and .deb. Run it from the Actions tab ("Run workflow")
+# or by pushing a v* tag; never on every push, since Actions minutes are limited.
+# Ubuntu 22.04 on purpose: an AppImage only runs on distros with the same or a newer
+# glibc than the one it was built on, so the oldest supported runner reaches the most.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: linux-bundle-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Tauri's Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev libssl-dev libdbus-1-dev libxdo-dev patchelf file cmake clang \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-pulseaudio
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          prefix-key: v1-ggml-portable
+
+      - name: Install (downloads Live2D Cubism Core)
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests (web)
+        run: npm test
+
+      - name: Unit tests (Rust)
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build AppImage and .deb
+        run: npx tauri build
+
+      - name: Upload bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-assistant-linux
+          path: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/deb/*.deb
+          retention-days: 14

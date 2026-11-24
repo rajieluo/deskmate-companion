@@ -19,6 +19,7 @@ mod model;
 mod pocket;
 mod history;
 mod stt;
+mod terminal;
 mod tts;
 mod voices;
 
@@ -1097,7 +1098,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                     .settings()
                     .claude_code_folder
                     .filter(|f| f.is_dir())
-                    .or_else(|| std::env::var_os("USERPROFILE").map(std::path::PathBuf::from))
+                    .or_else(|| std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(std::path::PathBuf::from))
                     .unwrap_or_else(|| ".".into());
                 if let Err(e) = claude_code::open_window(&folder, "") {
                     let _ = app.emit("crew-error", e);
@@ -1181,8 +1182,54 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Linux: run under X11 (XWayland on a Wayland desktop) unless told otherwise.
+/// Wayland doesn't let an app keep itself on top, place its own window, read the
+/// cursor outside it or grab global hotkeys, and the avatar needs all four.
+/// Set DESKTOP_ASSISTANT_WAYLAND=1 to try native Wayland anyway.
+#[cfg(target_os = "linux")]
+fn linux_env() {
+    let set = |key: &str| std::env::var_os(key).is_some_and(|v| !v.is_empty());
+    if set("WAYLAND_DISPLAY") && !set("GDK_BACKEND") && std::env::var("DESKTOP_ASSISTANT_WAYLAND").as_deref() != Ok("1") {
+        std::env::set_var("GDK_BACKEND", "x11");
+    }
+    // WebKitGTK's DMA-BUF renderer draws a blank or black (not see-through) window
+    // on many drivers, NVIDIA's especially. The fallback still renders WebGL on the GPU.
+    if !set("WEBKIT_DISABLE_DMABUF_RENDERER") {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+}
+
+/// Linux: WebKitGTK ships with getUserMedia switched off and turns down every
+/// microphone request unless the app answers it, so speech input needs both.
+#[cfg(target_os = "linux")]
+fn enable_microphone<R: Runtime>(window: &WebviewWindow<R>) {
+    let result = window.with_webview(|webview| {
+        use webkit2gtk::{PermissionRequestExt, SettingsExt, UserMediaPermissionRequest, UserMediaPermissionRequestExt, WebViewExt};
+        let view = webview.inner();
+        if let Some(settings) = WebViewExt::settings(&view) {
+            settings.set_enable_media_stream(true);
+        }
+        view.connect_permission_request(|_, request| {
+            use webkit2gtk::glib::Cast;
+            match request.downcast_ref::<UserMediaPermissionRequest>() {
+                // Audio only: the app never asks for the camera or the screen.
+                Some(media) if media.is_for_audio_device() && !media.is_for_video_device() => {
+                    request.allow();
+                    true
+                }
+                _ => false,
+            }
+        });
+    });
+    if let Err(e) = result {
+        log::warn!("couldn't turn on the microphone in the webview: {e}");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    linux_env();
     tauri::Builder::default()
         // A second launch just brings the running one forward. Two copies fight over the
         // hotkeys and the settings file, and one of them may be an old version.
@@ -1193,7 +1240,8 @@ pub fn run() {
                 let _ = w.set_focus();
             }
         }))
-        // Log file: %LOCALAPPDATA%\com.rajieluo.desktopassistant\logs\Desktop Assistant.log on Windows.
+        // Log file: %LOCALAPPDATA%\com.rajieluo.desktopassistant\logs\Desktop Assistant.log on Windows,
+        // ~/.local/share/com.rajieluo.desktopassistant/logs/ on Linux.
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
@@ -1283,6 +1331,8 @@ pub fn run() {
             build_tray(app.handle())?;
 
             let window = app.get_webview_window("main").expect("main window");
+            #[cfg(target_os = "linux")]
+            enable_microphone(&window);
             // First run: the window-state plugin has nothing to restore yet.
             if first_run {
                 reset_position(&window);

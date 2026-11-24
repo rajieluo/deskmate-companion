@@ -160,23 +160,26 @@ pub fn handoff_folder(current: &Path, folder: Option<&str>) -> PathBuf {
 /// Opens a new console window running interactive Claude Code in `folder`, starting with `brief`.
 /// The app launches it, not the agent, so no Claude Code permission rule is involved.
 pub fn open_window(folder: &Path, brief: &str) -> Result<(), String> {
-    if !cfg!(windows) {
-        return Err("Opening a Claude Code window is only supported on Windows.".into());
-    }
     let claude = find_claude().ok_or("I can't find Claude Code. Install it from https://claude.com/claude-code first.")?;
-    let mut cmd = std::process::Command::new(claude);
-    cmd.current_dir(folder);
     // One line: claude.cmd (npm installs) goes through cmd.exe, which can't take newlines.
     let brief = brief.split_whitespace().collect::<Vec<_>>().join(" ");
-    if !brief.is_empty() {
-        cmd.arg(brief);
-    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
+        let mut cmd = std::process::Command::new(claude);
+        cmd.current_dir(folder);
+        if !brief.is_empty() {
+            cmd.arg(brief);
+        }
         cmd.creation_flags(0x0000_0010); // CREATE_NEW_CONSOLE
+        cmd.spawn().map(|_| ()).map_err(|e| format!("Couldn't open a Claude Code window: {e}"))
     }
-    cmd.spawn().map(|_| ()).map_err(|e| format!("Couldn't open a Claude Code window: {e}"))
+    #[cfg(not(windows))]
+    {
+        // Linux: in a new terminal window.
+        let args: Vec<std::ffi::OsString> = if brief.is_empty() { vec![] } else { vec![brief.into()] };
+        crate::terminal::open(&claude, &args, Some(folder))
+    }
 }
 
 pub fn avatar_prompt(name: &str, character: Option<&str>, sessions_file: &Path) -> String {
@@ -412,7 +415,12 @@ pub fn find_claude() -> Option<PathBuf> {
         dirs.push(home.join(".claude").join("local"));
         if cfg!(windows) {
             dirs.push(home.join("AppData").join("Roaming").join("npm"));
+        } else {
+            dirs.push(home.join(".npm-global").join("bin"));
         }
+    }
+    if !cfg!(windows) {
+        dirs.push("/usr/local/bin".into());
     }
     for dir in dirs {
         for name in names {

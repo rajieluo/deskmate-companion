@@ -26,7 +26,7 @@ base64 = "0.22"
 percent-encoding = "2"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 futures-util = "0.3"
-keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native"] }
+keyring = { version = "3", features = ["windows-native", "apple-native"] }
 tauri-plugin-global-shortcut = "2"
 whisper-rs = "0.16"
 tokio = { version = "1", features = ["sync", "process", "io-util", "time"] }
@@ -34,3 +34,10 @@ tokio = { version = "1", features = ["sync", "process", "io-util", "time"] }
 [target.'cfg(windows)'.dependencies]
 # DirectML lets the native voice run on the GPU (settings voice_device "gpu").
 ort = { version = "=2.0.0-rc.9", default-features = false, features = ["load-dynamic", "directml"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# API keys go in the desktop's keyring (GNOME Keyring / KWallet via the Secret
+# Service), which survives a reboot, unlike the kernel keyring ("linux-native").
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+# Turns on the microphone (getUserMedia) in the WebKitGTK webview; see lib.rs.
+webkit2gtk = "2"
