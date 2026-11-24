@@ -220,6 +220,10 @@ Check each model's readme for its terms; many MMD models allow personal use only
 
 Tauri can only make a whole window ignore the mouse. So the Rust side polls the global cursor position about 30 times a second and sends it to the page. The page reads the alpha of the pixel under the cursor; over the character (or any element marked `data-hit`) it turns mouse events on, elsewhere it turns them off.
 
+## License
+
+The app's own code is under the [MIT License](LICENSE). That covers this repository only: Live2D Cubism Core, Live2D or MMD models, motions and voices keep their own licenses and are never part of it.
+
 ### Third-party code
 
 - [Live2D Cubism Core](https://www.live2d.com/en/sdk/license/) is downloaded at install time and is subject to the Live2D Proprietary Software License. It is free for individuals and small businesses.
