@@ -65,9 +65,16 @@ try {
         Write-Host "Already there: $uv"
     } else {
         $zip = Join-Path $pocket 'uv.zip'
-        $url = 'https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip'
+        # Pinned uv release and its SHA-256, so a swapped download is refused.
+        $url = 'https://github.com/astral-sh/uv/releases/download/0.13.9/uv-x86_64-pc-windows-msvc.zip'
+        $sha256 = 'edd61f7f5728a56cc62455386661860bdfc7bab65872f39b0c25bdcc1d8e1beb'
         Write-Host "Downloading $url"
         Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+        $got = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLowerInvariant()
+        if ($got -ne $sha256) {
+            Remove-Item -Force $zip
+            throw "The uv download doesn't match its checksum (got $got), so it wasn't installed"
+        }
         $unpacked = Join-Path $pocket 'uv-unpack'
         if (Test-Path $unpacked) { Remove-Item -Recurse -Force $unpacked }
         Expand-Archive -Path $zip -DestinationPath $unpacked -Force
