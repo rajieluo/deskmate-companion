@@ -139,6 +139,7 @@ export function sortVmds(files: readonly string[]): VmdSet {
 /** Bone names of the standard MMD skeleton the app moves itself. */
 export const BONES = {
   upperBody: ["上半身", "upper body", "UpperBody"],
+  lowerBody: ["下半身", "lower body", "LowerBody"],
   neck: ["首", "neck", "Neck"],
   head: ["頭", "head", "Head"],
   eyes: ["両目", "eyes", "Eyes"],

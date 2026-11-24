@@ -419,7 +419,7 @@ export class MmdAvatar implements Character {
     const mmd = this.mmd;
     if (!mmd) return;
     const now = performance.now();
-    const controlled = [BONES.upperBody, BONES.neck, BONES.head, BONES.eyes, BONES.leftArm, BONES.rightArm, BONES.leftElbow, BONES.rightElbow]
+    const controlled = [BONES.upperBody, BONES.lowerBody, BONES.neck, BONES.head, BONES.eyes, BONES.leftArm, BONES.rightArm, BONES.leftElbow, BONES.rightElbow]
       .map((names) => findBone(this.bones, names))
       .filter((b): b is IMmdRuntimeLinkedBone => b !== null);
     const identity = Quaternion.Identity();
@@ -465,6 +465,8 @@ export class MmdAvatar implements Character {
     const pitch = -this.look.y * 0.3;
     // The body follows a little too: turns towards the cursor and leans to its side.
     rotate(BONES.upperBody, pitch * 0.25, yaw * 0.35, -this.look.x * 0.08);
+    // The hips follow just slightly; the leg IK keeps her feet where they are.
+    rotate(BONES.lowerBody, 0, yaw * 0.12, -this.look.x * 0.03);
     rotate(BONES.neck, pitch * 0.4, yaw * 0.4, 0);
     rotate(BONES.head, pitch * 0.6, yaw * 0.6, 0);
     rotate(BONES.eyes, pitch * 0.5, yaw * 0.6, 0);
