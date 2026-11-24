@@ -7,6 +7,7 @@ import { setLinkedText } from "./links";
 import { Mic } from "./mic";
 import type { Voice } from "./voice";
 import { SlashMenu } from "./slash";
+import { danceIntent, pickDance } from "./dance";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -70,7 +71,10 @@ export class ChatUI {
       const text = this.input.value.trim();
       this.input.value = "";
       this.slash.hide();
-      if (text && !this.appCommand(text)) void this.send(text);
+      if (text && !this.appCommand(text)) {
+        void this.maybeDance(text);
+        void this.send(text);
+      }
     });
     this.input.addEventListener("keydown", (e) => {
       if (e.key === "Escape") this.close();
@@ -166,8 +170,10 @@ export class ChatUI {
     this.input.placeholder = "Transcribing…";
     try {
       const text = (await host.transcribe(recording.samples)).trim();
-      if (text) await this.send(text);
-      else this.say("Sorry, I didn't catch that.", 3000);
+      if (text) {
+        void this.maybeDance(text);
+        await this.send(text);
+      } else this.say("Sorry, I didn't catch that.", 3000);
     } catch (err) {
       this.say(String(err), 8000);
     } finally {
@@ -181,6 +187,30 @@ export class ChatUI {
    * Slash commands the app handles itself in Claude Code mode. Every other "/command" goes to
    * Claude Code as typed, which runs it (skills, custom commands, /compact, /context…).
    */
+  private lastDance: string | null = null;
+
+  /** "Dance!" makes an MMD character dance right away; the message still goes to Claude. */
+  private async maybeDance(text: string) {
+    if (!this.avatar.canDance) return;
+    const dances = await host.danceList();
+    const intent = danceIntent(text, dances.map((d) => d.name));
+    if (!intent) return;
+    if (intent.kind === "stop") {
+      this.avatar.stopDance();
+      return;
+    }
+    const picked = pickDance(dances, intent.name, this.lastDance);
+    this.lastDance = picked?.name ?? null;
+    host.log("info", `[dance] ${picked ? `${picked.name} (${picked.motions.length} motion files${picked.audio ? ", music" : ""})` : "built-in dance"}`);
+    try {
+      await this.avatar.dance(picked ? host.danceMotion(picked) : null);
+    } catch (err) {
+      host.log("warn", `[dance] couldn't play ${picked?.name}: ${(err as Error).message}`);
+      // Still dance, just the built-in one.
+      await this.avatar.dance(null).catch(() => false);
+    }
+  }
+
   private appCommand(text: string): boolean {
     if (document.body.dataset.brain !== "claude_code") return false;
     const cmd = text.toLowerCase();

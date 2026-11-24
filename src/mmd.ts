@@ -41,6 +41,7 @@ import { MultiPhysicsRuntime } from "babylon-mmd/esm/Runtime/Optimized/Physics/B
 import { MmdBulletPhysics } from "babylon-mmd/esm/Runtime/Optimized/Physics/mmdBulletPhysics";
 
 import type { Character } from "./character";
+import { builtinDancePose, type DanceMotion } from "./dance";
 import { BONES, blinkWeight, envelope, faceRig, findBone, sortVmds, type FaceRig, type VmdFile, type VmdSet } from "./mmd-face";
 import type { Emotion, MotionSummary } from "./motions";
 import type { ModelActions } from "./poses";
@@ -55,7 +56,9 @@ const MORPH_PREFIX = "morph:";
 const ARMS_DOWN = 0.62;
 
 interface Playing {
-  file: VmdFile;
+  key: string;
+  /** A dance: back to idle (and the music stops) when it ends. */
+  dance: boolean;
   handle: MmdRuntimeAnimationHandle;
   endFrame: number;
   loop: boolean;
@@ -79,6 +82,13 @@ export class MmdAvatar implements Character {
   private vmds: VmdSet = { idle: null, emotions: {}, all: [] };
   private handles = new Map<string, MmdRuntimeAnimationHandle>();
   private playing: Playing | null = null;
+  /** When the built-in dance started, while it plays. */
+  private builtinDance: number | null = null;
+  private danceMusic: HTMLAudioElement | null = null;
+  /** Cancels a dance still loading when something else starts. */
+  private danceId = 0;
+  /** How much the head and body follow the cursor (eased to 0 while dancing). */
+  private lookWeight = 1;
   /** A motion picked in the picker; loops instead of the folder's idle. */
   private pickedIdle: VmdFile | null | undefined = undefined;
   private modelUrl = "";
@@ -193,6 +203,7 @@ export class MmdAvatar implements Character {
       container.dispose();
       throw new Error("superseded");
     }
+    this.endDance();
     this.unloadModel();
     container.addAllToScene();
     const mesh = container.meshes[0] as Mesh;
@@ -246,6 +257,7 @@ export class MmdAvatar implements Character {
   dispose() {
     this.disposed = true;
     this.loadId++;
+    this.endDance();
     window.removeEventListener("resize", this.onResize);
     this.engine.stopRenderLoop();
     this.unloadModel();
@@ -328,13 +340,15 @@ export class MmdAvatar implements Character {
 
   // --- Motions ---------------------------------------------------------------
 
-  private async handleFor(file: VmdFile): Promise<MmdRuntimeAnimationHandle> {
-    const known = this.handles.get(file.file);
+  /** The model's handle for a motion made of `urls` (several .vmd files play as one). */
+  private async handleFor(key: string, label: string, urls: string[]): Promise<MmdRuntimeAnimationHandle> {
+    const known = this.handles.get(key);
     if (known) return known;
-    const url = new URL(file.file.split("/").map(encodeURIComponent).join("/"), this.modelUrl).href;
-    const animation = await new VmdLoader(this.scene).loadAsync(file.label, url);
-    const handle = this.mmd!.createRuntimeAnimation(animation);
-    this.handles.set(file.file, handle);
+    const mmd = this.mmd!;
+    const animation = await new VmdLoader(this.scene).loadAsync(label, urls.length === 1 ? urls[0] : urls);
+    if (this.mmd !== mmd) throw new Error("superseded");
+    const handle = mmd.createRuntimeAnimation(animation);
+    this.handles.set(key, handle);
     return handle;
   }
 
@@ -346,11 +360,94 @@ export class MmdAvatar implements Character {
       mmd.setRuntimeAnimation(null);
       return;
     }
-    const handle = await this.handleFor(file);
+    const url = new URL(file.file.split("/").map(encodeURIComponent).join("/"), this.modelUrl).href;
+    const handle = await this.handleFor(file.file, file.label, [url]);
     if (this.mmd !== mmd) return;
+    this.start(handle, file.file, loop, false);
+  }
+
+  private start(handle: MmdRuntimeAnimationHandle, key: string, loop: boolean, dance: boolean) {
+    const mmd = this.mmd!;
     mmd.setRuntimeAnimation(handle);
     const endFrame = mmd.currentAnimation?.animation.endFrame ?? 0;
-    this.playing = { file, handle, endFrame, loop, start: performance.now() };
+    this.playing = { key, dance, handle, endFrame, loop, start: performance.now() };
+  }
+
+  get canDance() {
+    return this.mmd !== null;
+  }
+
+  get dancing() {
+    return this.builtinDance !== null || this.playing?.dance === true;
+  }
+
+  /**
+   * Plays a dance once (with its music), then goes back to the idle. With no
+   * dance given she does the built-in one. Asking again while she dances does nothing.
+   */
+  async dance(motion: DanceMotion | null): Promise<boolean> {
+    const mmd = this.mmd;
+    if (!mmd) return false;
+    if (this.dancing) return true;
+    const id = ++this.danceId;
+    if (!motion) {
+      this.playing = null;
+      mmd.setRuntimeAnimation(null);
+      this.builtinDance = performance.now();
+      return true;
+    }
+    const handle = await this.handleFor(`dance:${motion.urls.join("|")}`, motion.name, motion.urls);
+    if (this.mmd !== mmd || id !== this.danceId) return false;
+    let music: HTMLAudioElement | null = null;
+    if (motion.audio) {
+      music = new Audio(motion.audio);
+      music.volume = 0.6;
+      this.danceMusic = music;
+      // Start the motion when the music really starts, so they stay together.
+      await music.play().catch((e) => {
+        console.warn("[mmd] dance music failed", e);
+        music = null;
+      });
+      if (id !== this.danceId) return false;
+    }
+    this.start(handle, motion.name, false, true);
+    if (music) {
+      // Follow the music's clock from now on; the motion's frames are 1/30 s.
+      const m = music;
+      const p = this.playing!;
+      p.start = performance.now() - m.currentTime * 1000;
+    }
+    return true;
+  }
+
+  /** Stops a dance (and its music) and goes back to the idle. */
+  stopDance() {
+    if (!this.dancing && !this.danceMusic) return;
+    this.endDance();
+    void this.startIdle();
+  }
+
+  private endDance() {
+    this.danceId++;
+    if (this.builtinDance !== null) {
+      this.builtinDance = null;
+      this.resetCenter();
+    }
+    if (this.playing?.dance) this.playing = null;
+    if (this.danceMusic) {
+      this.danceMusic.pause();
+      this.danceMusic.removeAttribute("src");
+      this.danceMusic = null;
+    }
+  }
+
+  /** Puts the センター bone back where it rests (the built-in dance moves it). */
+  private resetCenter() {
+    const center = findBone(this.bones, BONES.center);
+    if (!center) return;
+    const rest = new Vector3();
+    center.getRestMatrix().getTranslationToRef(rest);
+    center.position = rest;
   }
 
   private startIdle() {
@@ -360,6 +457,7 @@ export class MmdAvatar implements Character {
 
   /** Loops the picked motion (or the built-in idle) from now on, also next time. */
   playMotion(group: string, index: number) {
+    this.endDance();
     if (group === BUILTIN_GROUP) this.pickedIdle = null;
     else if (group === VMD_GROUP && this.vmds.all[index]) this.pickedIdle = this.vmds.all[index];
     else return;
@@ -376,7 +474,8 @@ export class MmdAvatar implements Character {
     const vmd = this.vmds.emotions[emotion];
     if (!this.mmd || (!morphs && !vmd)) return false;
     if (morphs) this.emotion = { morphs, start: performance.now() };
-    if (vmd) void this.play(vmd, false).catch((e) => console.warn("[mmd] emotion motion failed", e));
+    // An emotion's motion would cut the dance short; the face still shows it.
+    if (vmd && !this.dancing) void this.play(vmd, false).catch((e) => console.warn("[mmd] emotion motion failed", e));
     return true;
   }
 
@@ -432,6 +531,7 @@ export class MmdAvatar implements Character {
       if (frame >= p.endFrame) {
         if (p.loop) frame = p.endFrame > 0 ? frame % p.endFrame : 0;
         else {
+          if (p.dance) this.endDance();
           this.playing = null;
           void this.startIdle();
           frame = p.endFrame;
@@ -448,7 +548,29 @@ export class MmdAvatar implements Character {
       const q = b.rotationQuaternion.multiply(Quaternion.RotationYawPitchRoll(y, x, z));
       b.setRotationQuaternion(q, Space.LOCAL);
     };
-    if (!this.playing) {
+    const dancePose = this.builtinDance !== null ? builtinDancePose(now - this.builtinDance, ARMS_DOWN) : null;
+    if (this.builtinDance !== null && !dancePose) {
+      this.builtinDance = null;
+      this.resetCenter();
+      void this.startIdle();
+    }
+    if (dancePose) {
+      // 2b. The built-in dance, in place of the idle.
+      rotate(BONES.upperBody, ...dancePose.upperBody);
+      rotate(BONES.lowerBody, ...dancePose.lowerBody);
+      rotate(BONES.head, ...dancePose.head);
+      rotate(BONES.leftArm, ...dancePose.leftArm);
+      rotate(BONES.rightArm, ...dancePose.rightArm);
+      rotate(BONES.leftElbow, ...dancePose.leftElbow);
+      rotate(BONES.rightElbow, ...dancePose.rightElbow);
+      const center = findBone(this.bones, BONES.center);
+      if (center) {
+        const rest = new Vector3();
+        center.getRestMatrix().getTranslationToRef(rest);
+        rest.y -= dancePose.dip;
+        center.position = rest;
+      }
+    } else if (!this.playing) {
       rotate(BONES.leftArm, 0, 0, -ARMS_DOWN);
       rotate(BONES.rightArm, 0, 0, ARMS_DOWN);
       rotate(BONES.leftElbow, 0, -0.12, 0);
@@ -456,17 +578,19 @@ export class MmdAvatar implements Character {
       rotate(BONES.upperBody, Math.sin(t * 1.6) * 0.02, Math.sin(t * 0.37) * 0.03, Math.sin(t * 0.23) * 0.025);
     }
 
-    // 3. Looking at the cursor, eased.
+    // 3. Looking at the cursor, eased; not while dancing, the dance moves her head.
     const k = 0.12;
     this.look.x += (this.lookTarget.x - this.look.x) * k;
     this.look.y += (this.lookTarget.y - this.look.y) * k;
+    this.lookWeight += ((this.dancing ? 0 : 1) - this.lookWeight) * 0.08;
+    const lw = this.lookWeight;
     // Signs checked on screen: the model faces the camera, so her left is screen right.
-    const yaw = -this.look.x * 0.45;
-    const pitch = -this.look.y * 0.3;
+    const yaw = -this.look.x * 0.45 * lw;
+    const pitch = -this.look.y * 0.3 * lw;
     // The body follows a little too: turns towards the cursor and leans to its side.
-    rotate(BONES.upperBody, pitch * 0.25, yaw * 0.35, -this.look.x * 0.08);
+    rotate(BONES.upperBody, pitch * 0.25, yaw * 0.35, -this.look.x * 0.08 * lw);
     // The hips follow just slightly; the leg IK keeps her feet where they are.
-    rotate(BONES.lowerBody, 0, yaw * 0.12, -this.look.x * 0.03);
+    rotate(BONES.lowerBody, 0, yaw * 0.12, -this.look.x * 0.03 * lw);
     rotate(BONES.neck, pitch * 0.4, yaw * 0.4, 0);
     rotate(BONES.head, pitch * 0.6, yaw * 0.6, 0);
     rotate(BONES.eyes, pitch * 0.5, yaw * 0.6, 0);
@@ -511,6 +635,7 @@ export class MmdAvatar implements Character {
       `mouth ${this.rig.mouth}`,
       `emotions ${Object.keys(this.rig.emotions).join(",")}`,
       `vmd ${this.vmds.all.length} (idle ${this.vmds.idle?.label ?? "built-in"})`,
+      `dancing ${this.dancing}`,
       `height ${(this.maxY - this.minY).toFixed(1)}`,
     ];
     return Promise.resolve(parts.join("; "));

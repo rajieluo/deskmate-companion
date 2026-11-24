@@ -103,6 +103,8 @@ pub struct Settings {
     pub crew_distro: Option<String>,
     /// Crew mode: the firstmate home inside WSL. Default: ~/firstmate.
     pub crew_home: Option<String>,
+    /// Folder of MMD dance motions (see dances.rs). Default: Documents\\Desktop Assistant\\Dances.
+    pub dances_folder: Option<PathBuf>,
     /// Keys this build doesn't know (written by a newer or differently built app),
     /// kept as they are so saving doesn't drop them.
     #[serde(flatten)]
@@ -286,17 +288,25 @@ impl ModelStore {
 
     /// Serves `/<generation>/<relative path>` from the current model folder.
     pub fn serve(&self, uri_path: &str) -> Response<Vec<u8>> {
-        match self.dir().and_then(|dir| resolve(&dir, uri_path)) {
-            Some(file) => match fs::read(&file) {
-                Ok(bytes) => respond(StatusCode::OK, content_type(&file), bytes),
-                Err(_) => respond(StatusCode::NOT_FOUND, "text/plain", b"not found".to_vec()),
-            },
+        match self.dir() {
+            Some(dir) => Self::serve_from(&dir, uri_path),
             None => respond(StatusCode::NOT_FOUND, "text/plain", b"not found".to_vec()),
         }
     }
 
     fn dir(&self) -> Option<PathBuf> {
         self.current_dir()
+    }
+
+    /// Serves `/<first segment>/<relative path>` from `dir`.
+    pub fn serve_from(dir: &Path, uri_path: &str) -> Response<Vec<u8>> {
+        match resolve(dir, uri_path) {
+            Some(file) => match fs::read(&file) {
+                Ok(bytes) => respond(StatusCode::OK, content_type(&file), bytes),
+                Err(_) => respond(StatusCode::NOT_FOUND, "text/plain", b"not found".to_vec()),
+            },
+            None => respond(StatusCode::NOT_FOUND, "text/plain", b"not found".to_vec()),
+        }
     }
 }
 

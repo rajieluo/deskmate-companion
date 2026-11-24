@@ -30,7 +30,7 @@ INSTALL.md also covers [loading your own Live2D models, choosing or adding voice
 ## Using it
 
 - **First run** asks you to pick a `.model3.json` (Live2D) or `.pmx` (MMD) file.
-- **Tray icon** (bottom right of the taskbar): *Choose model…*, *Reset position*, *Reload*, *Quit*.
+- **Tray icon** (bottom right of the taskbar): *Choose model…*, *Open dances folder*, *Reset position*, *Reload*, *Quit*.
 - **Right-click** her to open the same options menu as the tray icon.
 - **Drag** the character to move her. The position and size are remembered.
 - **Click** her (or press **Ctrl+Shift+Space** anywhere) to open the chat box. Type and press Enter; Esc closes it.
@@ -205,8 +205,24 @@ Pick a `.pmx` (or older `.pmd`) file instead of a `.model3.json` and the app dra
 - **Motion**: MMD models stand in a T-pose and don't come with idle animations. Put `.vmd` motion files anywhere in the model's folder: one whose name looks like an idle (`idle`, `wait`, `stand`, `breath`, `loop`…) loops on its own, emotion names (`happy.vmd`, `sad.vmd`…) play once when she feels that way, and every `.vmd` is listed under Animations in the poses picker. Without any, the app lowers her arms and adds gentle breathing and sway.
 - **Hair and clothes** swing with the model's own physics (Bullet, compiled to WebAssembly).
 - She turns her head and eyes towards the cursor, and click-through works the same as for Live2D.
+- **Dancing**: ask her to dance in chat and she does. See [Dancing](#dancing-mmd-models) below.
 
 Check each model's readme for its terms; many MMD models allow personal use only.
+
+### Dancing (MMD models)
+
+Ask an MMD character to dance in chat, typed or out loud, and she dances once, then goes back to her idle. Your message still goes to Claude, so she answers too.
+
+- **Asking**: "dance", "please dance", "can you dance?", "do a little dance", "let's dance", "dance for me", "dance again", or a dance's name: "dance Lamb", "do the Lamb dance". Talking *about* dancing ("I went dancing last night", "don't dance") doesn't start one. **"Stop dancing"** (or just "stop") stops her.
+- **The dances folder** is `Documents\Desktop Assistant\Dances`, shared by every MMD model. The app creates it on first start with a short `README.txt`, and the tray's **Open dances folder** opens it. To use another folder, set `"dances_folder"` in `settings.json`.
+- **Adding a dance**, either way:
+  - Drop in a single motion file, e.g. `Lamb.vmd`. Music with the same name next to it (`Lamb.wav`, `Lamb.mp3` or `Lamb.ogg`) plays along.
+  - Or make a folder, e.g. `Lamb\`, and put the dance pack's `.vmd` files inside (sub-folders are fine). They all play together, since packs often split the body, face and lip motions. Camera motions (`camera.vmd`, `カメラ.vmd`) are skipped. The first `.wav`, `.mp3` or `.ogg` file inside is the music.
+- **Which dance**: say its name (the file or folder name) to pick it; otherwise she picks one at random, not the one she just did. New dances are found the next time you ask, no restart needed.
+- **No dances yet?** She does a short built-in dance (about 12 seconds), so it works right away.
+- While she dances she stops following the cursor, and emotions only change her face, so the dance isn't cut short. Picking a motion in the poses picker or switching models ends it.
+- Dance motions are made for the standard MMD skeleton, so most of them work with most models. Many are free for personal use only: check each one's terms. Dance and music files are never committed to this repo.
+- Live2D models don't dance; their motions are made for each model.
 
 ## Developing
 

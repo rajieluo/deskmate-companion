@@ -13,6 +13,7 @@ mod chat;
 mod claude_code;
 mod sessions;
 mod crew;
+mod dances;
 mod firstmate;
 mod model;
 mod pocket;
@@ -354,6 +355,27 @@ fn set_voice_tuning(store: State<'_, Arc<ModelStore>>, speed: f32, pitch: f32) {
 #[tauri::command]
 fn model_files(store: State<'_, Arc<ModelStore>>) -> Vec<String> {
     store.current_dir().map(|d| model::list_model_files(&d)).unwrap_or_default()
+}
+
+/// Where dances live: `dances_folder`, else Documents\\Desktop Assistant\\Dances.
+fn dances_dir<R: Runtime, M: Manager<R>>(app: &M) -> std::path::PathBuf {
+    if let Some(dir) = app.state::<Arc<ModelStore>>().settings().dances_folder.filter(|d| !d.as_os_str().is_empty()) {
+        return dir;
+    }
+    app.path()
+        .document_dir()
+        .or_else(|_| app.path().home_dir())
+        .unwrap_or_else(|_| ".".into())
+        .join("Desktop Assistant")
+        .join("Dances")
+}
+
+/// The dances in the dances folder (see dances.rs).
+#[tauri::command]
+fn dance_list<R: Runtime>(app: AppHandle<R>) -> Vec<dances::Dance> {
+    let dir = dances_dir(&app);
+    dances::ensure(&dir);
+    dances::list(&dir)
 }
 
 /// Lets the page write to the log file (diagnostics, errors).
@@ -951,6 +973,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let crew = CheckMenuItem::with_id(app, "crew", "Crew mode (firstmate)", true, crew_on, None::<&str>)?;
     let crew_open = MenuItem::with_id(app, "crew_open", "Open crew terminal", true, None::<&str>)?;
     let crew_window = MenuItem::with_id(app, "crew_window", "Crew sessions…", true, None::<&str>)?;
+    let dances_item = MenuItem::with_id(app, "dances", "Open dances folder", true, None::<&str>)?;
     app.manage(BrainMenu { code: code.clone(), crew: crew.clone() });
     let sep3 = PredefinedMenuItem::separator(app)?;
     let current_model = chat_choice(&app.state::<Arc<ModelStore>>().settings());
@@ -994,7 +1017,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let menu =
-        Menu::with_items(app, &[&talk, &listen, &voice, &voice_menu, &history_item, &forget, &sep3, &model_menu, &code, &code_folder, &code_window, &crew, &crew_window, &crew_open, &key, &sep, &choose, &follow, &fade, &bar_menu, &reset, &reload, &sep2, &quit])?;
+        Menu::with_items(app, &[&talk, &listen, &voice, &voice_menu, &history_item, &forget, &sep3, &model_menu, &code, &code_folder, &code_window, &crew, &crew_window, &crew_open, &key, &sep, &choose, &dances_item, &follow, &fade, &bar_menu, &reset, &reload, &sep2, &quit])?;
     // Kept so a right-click on the avatar can pop up the same menu; its
     // clicks go through the tray's on_menu_event handler below.
     app.manage(TrayMenu(menu.clone()));
@@ -1027,6 +1050,11 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             }
             "history" => open_history(app),
             "crew_window" => open_crew_window(app),
+            "dances" => {
+                if let Err(e) = dances::open(&dances_dir(app)) {
+                    log::warn!("couldn't open the dances folder: {e}");
+                }
+            }
             "fade" => {
                 let store = app.state::<Arc<ModelStore>>();
                 let on = !store.settings().fade_bottom.unwrap_or(true);
@@ -1203,7 +1231,15 @@ pub fn run() {
         )
         .register_asynchronous_uri_scheme_protocol("model", |ctx, request, responder| {
             let store = ctx.app_handle().state::<Arc<ModelStore>>().inner().clone();
-            thread::spawn(move || responder.respond(store.serve(request.uri().path())));
+            let path = request.uri().path().to_string();
+            // /dance/... comes from the dances folder; everything else from the model's folder.
+            let dances = path.starts_with("/dance/").then(|| dances_dir(ctx.app_handle()));
+            thread::spawn(move || {
+                responder.respond(match dances {
+                    Some(dir) => ModelStore::serve_from(&dir, &path),
+                    None => store.serve(&path),
+                })
+            });
         })
         .setup(|app| {
             let default_hook = std::panic::take_hook();
@@ -1219,6 +1255,8 @@ pub fn run() {
             store.save();
             store.publish_persona();
             app.manage(store);
+            // Made up front so it's there to drop dances into.
+            dances::ensure(&dances_dir(app));
             app.manage(Arc::new(Chat::default()));
             app.manage(Arc::new(ClaudeCode::default()));
             let crew = Arc::new(Crew::default());
@@ -1317,6 +1355,7 @@ pub fn run() {
             transcribe,
             page_log,
             model_files,
+            dance_list,
             history_append,
             history_read,
             history_clear,

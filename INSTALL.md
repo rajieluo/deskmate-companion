@@ -78,6 +78,8 @@ The folder's name matters: it's her default name (`Hiyori` becomes Hiyori, `mori
 
 **MMD models** stand in a T-pose and don't come with idle animations. Put `.vmd` motion files anywhere in the model's folder: one named like an idle (`idle.vmd`, `wait.vmd`, `loop.vmd`…) loops while she stands, and emotion names (`happy.vmd`, `sad.vmd`…) play when she feels that way. Without any, the app lowers her arms and adds gentle breathing and sway. See the README's [MMD models](README.md#mmd-models-pmx--pmd) section.
 
+**Dancing**: ask an MMD character to dance in chat ("dance", "can you dance?") and she dances, then goes back to her idle. Dances go in `Documents\Desktop Assistant\Dances` (tray > **Open dances folder**): drop in a `.vmd` dance motion, with a same-named `.mp3`/`.wav`/`.ogg` for music, or a folder holding a dance pack. With no dances she does a short built-in one. See the README's [Dancing](README.md#dancing-mmd-models) section.
+
 Read each model's license or readme. Many Live2D and MMD models allow personal use only and forbid passing them on.
 
 ## 3. Chat: Gemini (free) or Claude
@@ -237,6 +239,7 @@ The WSL2 route, all crew settings, and crew troubleshooting are in [docs/crew-se
 | What | Where |
 |---|---|
 | Models, `persona.md`, `voice.txt`, `voice.wav`, `voice.safetensors`, `.vmd` motions | The model folders you made |
+| Dances (`.vmd` and music) | `Documents\Desktop Assistant\Dances` |
 | `settings.json`, `personas\`, chat history (`history.jsonl`), downloaded voice and Whisper models, Pocket TTS (`pocket\`) | `%APPDATA%\com.rajieluo.desktopassistant\` (paste it into File Explorer's address bar) |
 | API keys | Windows Credential Manager, under `desktop-assistant` |
 | The log, `Desktop Assistant.log` | `%LOCALAPPDATA%\com.rajieluo.desktopassistant\logs\` |

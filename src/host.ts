@@ -4,6 +4,7 @@
 import { Channel, convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import type { DanceInfo, DanceMotion } from "./dance";
 
 export const inTauri = "__TAURI_INTERNALS__" in window;
 
@@ -205,6 +206,25 @@ export async function modelFiles(): Promise<string[]> {
   if (inTauri) return invoke<string[]>("model_files").catch(() => []);
   // Browser dev mode: ?files=a.exp3.json,b.motion3.json
   return (new URLSearchParams(location.search).get("files") ?? "").split(",").filter(Boolean);
+}
+
+/** The dances in the dances folder, with their files as URLs the page can load. */
+export async function danceList(): Promise<DanceInfo[]> {
+  if (!inTauri) return [];
+  return invoke<DanceInfo[]>("dance_list").catch((e) => {
+    console.warn("[dance]", e);
+    return [];
+  });
+}
+
+/** model://…/dance/<path> serves a file from the dances folder. */
+export function danceUrl(path: string): string {
+  const base = convertFileSrc("", "model").replace(/\/?$/, "/");
+  return `${base}dance/${path.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+export function danceMotion(d: DanceInfo): DanceMotion {
+  return { name: d.name, urls: d.motions.map(danceUrl), audio: d.audio ? danceUrl(d.audio) : null };
 }
 
 /** Writes a line to the app's log file (and the console). */
