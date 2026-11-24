@@ -46,6 +46,7 @@ import type { Emotion, MotionSummary } from "./motions";
 import type { ModelActions } from "./poses";
 
 const EMOTE_MS = 3200;
+const FPS = 30;
 const VMD_GROUP = "vmd";
 const BUILTIN_GROUP = "builtin";
 const MORPH_PREFIX = "morph:";
@@ -119,7 +120,14 @@ export class MmdAvatar implements Character {
     );
     this.scene = this.makeScene();
     this.camera = this.scene.activeCamera as FreeCamera;
-    this.engine.runRenderLoop(() => this.scene.render());
+    // 30 fps is plenty for a desktop character and halves the GPU and CPU cost.
+    let last = 0;
+    this.engine.runRenderLoop(() => {
+      const now = performance.now();
+      if (now - last < 1000 / FPS - 2) return;
+      last = now;
+      this.scene.render();
+    });
     window.addEventListener("resize", this.onResize);
   }
 
@@ -131,6 +139,12 @@ export class MmdAvatar implements Character {
   private makeScene() {
     const scene = new Scene(this.engine);
     scene.clearColor = new Color4(0, 0, 0, 0);
+    // The app handles the mouse itself. Babylon's own input would preventDefault()
+    // every pointerdown, and then the canvas never gets mousedown/mouseup, so she
+    // couldn't be dragged or clicked.
+    scene.detachControl();
+    scene.preventDefaultOnPointerDown = false;
+    scene.preventDefaultOnPointerUp = false;
     scene.ambientColor = new Color3(0.5, 0.5, 0.5);
     // Babylon is left-handed; MMD models face -Z, so the camera looks along +Z.
     const camera = new FreeCamera("camera", new Vector3(0, 10, -100), scene);
@@ -160,6 +174,9 @@ export class MmdAvatar implements Character {
       const wasm = await GetMmdWasmInstance(new MmdWasmInstanceTypeSPR());
       const physics = new MultiPhysicsRuntime(wasm);
       physics.setGravity(new Vector3(0, -98, 0));
+      // One physics step per drawn frame, like MMD itself.
+      physics.fixedTimeStep = 1 / FPS;
+      physics.maxSubSteps = 2;
       physics.register(this.scene);
       this.physics = physics;
       this.runtime = new MmdRuntime(this.scene, new MmdBulletPhysics(physics));
@@ -443,8 +460,11 @@ export class MmdAvatar implements Character {
     const k = 0.12;
     this.look.x += (this.lookTarget.x - this.look.x) * k;
     this.look.y += (this.lookTarget.y - this.look.y) * k;
-    const yaw = this.look.x * 0.45;
-    const pitch = this.look.y * 0.3;
+    // Signs checked on screen: the model faces the camera, so her left is screen right.
+    const yaw = -this.look.x * 0.45;
+    const pitch = -this.look.y * 0.3;
+    // The body follows a little too: turns towards the cursor and leans to its side.
+    rotate(BONES.upperBody, pitch * 0.25, yaw * 0.35, -this.look.x * 0.08);
     rotate(BONES.neck, pitch * 0.4, yaw * 0.4, 0);
     rotate(BONES.head, pitch * 0.6, yaw * 0.6, 0);
     rotate(BONES.eyes, pitch * 0.5, yaw * 0.6, 0);
