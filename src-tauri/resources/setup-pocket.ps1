@@ -1,4 +1,4 @@
-# Sets up Kyutai Pocket TTS (cloned voices) for Desktop Assistant.
+# Sets up Kyutai Pocket TTS (cloned voices) for Deskmate Companion.
 #
 # The app runs this from the tray (Voice > Set up Pocket TTS...). It needs no
 # Python on the PC and no admin rights. Everything goes into the app's data folder:
@@ -22,7 +22,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-try { $Host.UI.RawUI.WindowTitle = 'Desktop Assistant: Pocket TTS setup' } catch {}
+try { $Host.UI.RawUI.WindowTitle = 'Deskmate Companion: Pocket TTS setup' } catch {}
 
 $pocket = Join-Path $DataDir 'pocket'
 $venv = Join-Path $pocket 'venv'
@@ -54,7 +54,7 @@ function Finish($code) {
 }
 
 try {
-    Write-Host 'Desktop Assistant: setting up Pocket TTS (cloned voices)' -ForegroundColor Green
+    Write-Host 'Deskmate Companion: setting up Pocket TTS (cloned voices)' -ForegroundColor Green
     Write-Host "Folder: $pocket"
     Write-Host 'This downloads about 1 GB the first time and takes a few minutes.'
     New-Item -ItemType Directory -Force -Path $pocket | Out-Null

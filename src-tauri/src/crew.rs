@@ -40,7 +40,7 @@ const SAY_MARK: &str = "@@SAY@@ ";
 
 /// The helper that runs inside WSL. Usage: crew.sh <firstmate home> <command> [args...]
 pub const HELPER: &str = r#"#!/usr/bin/env bash
-# Written by Desktop Assistant (Crew mode). Runs inside WSL.
+# Written by Deskmate Companion (Crew mode). Runs inside WSL.
 # Usage: crew.sh <firstmate home> <command> [args...]
 home=$1
 cmd=$2

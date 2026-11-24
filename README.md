@@ -1,4 +1,4 @@
-# Desktop Assistant
+# Deskmate Companion
 
 A Claude-powered (or, free, Gemini-powered) Live2D or MMD character that lives on your Windows desktop. It runs on Linux too: see [INSTALL.md](INSTALL.md#linux).
 
@@ -182,7 +182,7 @@ Claude starts each reply with an emotion tag such as `[happy]`. The app strips t
 
 ## If something goes wrong
 
-The app writes a log to `%LOCALAPPDATA%\com.rajieluo.desktopassistant\logs\Desktop Assistant.log`. Known problems and fixes are in [INSTALL.md](INSTALL.md#troubleshooting).
+The app writes a log to `%LOCALAPPDATA%\com.rajieluo.desktopassistant\logs\Deskmate Companion.log`. Known problems and fixes are in [INSTALL.md](INSTALL.md#troubleshooting).
 
 ## Models
 

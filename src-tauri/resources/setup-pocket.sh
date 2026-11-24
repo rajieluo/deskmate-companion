@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sets up Kyutai Pocket TTS (cloned voices) for Desktop Assistant on Linux.
+# Sets up Kyutai Pocket TTS (cloned voices) for Deskmate Companion on Linux.
 # The Linux twin of setup-pocket.ps1.
 #
 # The app runs this from the tray (Voice > Set up Pocket TTS...) in a terminal
@@ -44,7 +44,7 @@ export UV_PYTHON_PREFERENCE=only-managed
 # PyTorch's CPU build: the default Linux wheel pulls in ~3 GB of CUDA libraries.
 export UV_TORCH_BACKEND=cpu
 
-printf '\033]0;Desktop Assistant: Pocket TTS setup\007'
+printf '\033]0;Deskmate Companion: Pocket TTS setup\007'
 cyan=$'\033[36m' green=$'\033[32m' yellow=$'\033[33m' red=$'\033[31m' plain=$'\033[0m'
 step() { printf '\n%s== %s%s\n' "$cyan" "$1" "$plain"; }
 
@@ -62,7 +62,7 @@ fail() {
 
 open_url() { xdg-open "$1" >/dev/null 2>&1 || echo "Open $1 in your browser."; }
 
-printf '%sDesktop Assistant: setting up Pocket TTS (cloned voices)%s\n' "$green" "$plain"
+printf '%sDeskmate Companion: setting up Pocket TTS (cloned voices)%s\n' "$green" "$plain"
 echo "Folder: $pocket"
 echo 'This downloads about 1 GB the first time and takes a few minutes.'
 mkdir -p "$pocket" || fail "Couldn't create $pocket"

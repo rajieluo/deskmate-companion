@@ -1,4 +1,4 @@
-"""Kyutai Pocket TTS sidecar for Desktop Assistant (see src-tauri/src/pocket.rs).
+"""Kyutai Pocket TTS sidecar for Deskmate Companion (see src-tauri/src/pocket.rs).
 
 Loads the model once, then reads one JSON request per line on stdin and writes
 one JSON message per line on stdout:
