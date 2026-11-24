@@ -23,7 +23,8 @@ export type MotionKind =
 
 // Checked in order; first match wins. Includes the pinyin names some models use.
 const RULES: [RegExp, "idle" | Emotion][] = [
-  [/wait|idle|stand|breath|loop|normal|daiji/, "idle"],
+  // 待機 "standby" and 立ち "standing" are the usual Japanese (MMD) names.
+  [/wait|idle|stand|breath|loop|normal|daiji|待機|立ち/, "idle"],
   [/happy|smile|joy|laugh|glad|weixiao|kaixin/, "happy"],
   [/sad|cry|tear|upset|sorrow|kuqi|shangxin/, "sad"],
   [/anger|angry|mad|rage|shengqi/, "angry"],

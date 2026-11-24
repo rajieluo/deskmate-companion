@@ -481,7 +481,8 @@ export function onCodeHandoff(cb: (h: CodeHandoff) => void) {
 }
 
 export function onCrewReply(cb: (body: string) => void) {
-  if (inTauri) void listen<{ id: string; body: string }>("crew-reply", (e) => cb(e.payload.body));
+  // Crew replies come as { id, body }; the first mate's own messages as a plain string.
+  if (inTauri) void listen<{ id: string; body: string } | string>("crew-reply", (e) => cb(typeof e.payload === "string" ? e.payload : e.payload.body));
 }
 
 /** A task needs you, failed, or has a PR ready. */

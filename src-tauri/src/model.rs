@@ -1,4 +1,5 @@
-//! Which Live2D model is loaded, where it lives, and the `model://` protocol that serves it.
+//! Which model is loaded (Live2D .model3.json or MMD .pmx/.pmd), where it lives,
+//! and the `model://` protocol that serves it.
 
 use std::{
     fs,
@@ -109,7 +110,7 @@ pub struct Settings {
 
 #[derive(Clone, Serialize)]
 pub struct ModelInfo {
-    /// File name of the .model3.json inside the model folder.
+    /// File name of the .model3.json (Live2D) or .pmx/.pmd (MMD) inside the model folder.
     pub file_name: String,
     /// Full path, for display.
     pub path: String,
@@ -248,17 +249,16 @@ impl ModelStore {
         self.current_dir().and_then(|d| crate::voices::pocket_voice(&d))
     }
 
-    /// The folder holding the current model's .model3.json.
+    /// The folder holding the current model file.
     pub fn current_dir(&self) -> Option<PathBuf> {
         let inner = self.inner.lock().unwrap();
         inner.settings.model_path.as_ref()?.parent().map(Path::to_path_buf)
     }
 
     pub fn set(&self, path: &Path) -> Result<ModelInfo, String> {
-        let name = path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-        if !name.ends_with(".model3.json") {
+        if !is_model_file(path) {
             return Err(format!(
-                "{} is not a Cubism 3/4 model file (expected *.model3.json)",
+                "{} is not a model file (expected a Live2D *.model3.json or an MMD *.pmx / *.pmd)",
                 path.display()
             ));
         }
@@ -301,9 +301,15 @@ impl ModelStore {
     }
 }
 
+/// True for the files the app can load: Live2D Cubism 3/4 (.model3.json) and MMD (.pmx, .pmd).
+pub fn is_model_file(path: &Path) -> bool {
+    let name = path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    name.ends_with(".model3.json") || name.ends_with(".pmx") || name.ends_with(".pmd")
+}
+
 /// Motion and expression files in a model folder (relative paths with "/"), so
 /// files the .model3.json doesn't list (common with VTube Studio models) can be
-/// offered too. Looks three folders deep and stops at 500 files.
+/// offered too, plus MMD .vmd motions. Looks three folders deep and stops at 500 files.
 pub fn list_model_files(dir: &Path) -> Vec<String> {
     fn walk(root: &Path, dir: &Path, depth: u32, out: &mut Vec<String>) {
         let Ok(entries) = fs::read_dir(dir) else { return };
@@ -321,7 +327,7 @@ pub fn list_model_files(dir: &Path) -> Vec<String> {
                 continue;
             }
             let name = e.file_name().to_string_lossy().to_lowercase();
-            if name.ends_with(".motion3.json") || name.ends_with(".exp3.json") {
+            if name.ends_with(".motion3.json") || name.ends_with(".exp3.json") || name.ends_with(".vmd") {
                 if let Ok(rel) = path.strip_prefix(root) {
                     let parts: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
                     out.push(parts.join("/"));
@@ -355,6 +361,8 @@ fn content_type(path: &Path) -> &'static str {
         Some("png") => "image/png",
         Some("jpg" | "jpeg") => "image/jpeg",
         Some("webp") => "image/webp",
+        Some("bmp") => "image/bmp",
+        Some("tga") => "image/x-tga",
         Some("wav") => "audio/wav",
         Some("mp3") => "audio/mpeg",
         Some("ogg") => "audio/ogg",
@@ -396,6 +404,23 @@ mod tests {
         assert!(files.contains(&"motions/00_Wait_01.motion3.json".to_string()), "{files:?}");
         assert!(files.contains(&"Love eye.exp3.json".to_string()), "{files:?}");
         assert!(!files.iter().any(|f| f.ends_with("model3.json") && !f.ends_with("motion3.json")));
+    }
+
+    #[test]
+    fn lists_mmd_motions() {
+        let dir = temp_model();
+        fs::write(dir.join("motions/idle.vmd"), "x").unwrap();
+        let files = list_model_files(&dir);
+        assert!(files.contains(&"motions/idle.vmd".to_string()), "{files:?}");
+    }
+
+    #[test]
+    fn accepts_live2d_and_mmd_model_files() {
+        assert!(is_model_file(Path::new("C:/m/1014100.model3.json")));
+        assert!(is_model_file(Path::new("C:/m/艾莲.pmx")));
+        assert!(is_model_file(Path::new("C:/m/Miku.PMD")));
+        assert!(!is_model_file(Path::new("C:/m/idle.vmd")));
+        assert!(!is_model_file(Path::new("C:/m/1014100.physics3.json")));
     }
 
     #[test]

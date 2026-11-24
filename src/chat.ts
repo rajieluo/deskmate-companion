@@ -1,5 +1,5 @@
 // Speech bubble + text box for talking to Claude.
-import type { Avatar } from "./avatar";
+import type { Character } from "./character";
 import * as host from "./host";
 import { SentenceBuffer, speakable } from "./sentences";
 import { TagStream } from "./tags";
@@ -38,7 +38,7 @@ export class ChatUI {
   private name = "Assistant";
 
   constructor(
-    private avatar: Avatar,
+    private avatar: Character,
     private voice: Voice,
   ) {
     host.onChat({

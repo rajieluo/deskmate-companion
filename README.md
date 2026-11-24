@@ -1,6 +1,6 @@
 # Desktop Assistant
 
-A Claude-powered (or, free, Gemini-powered) Live2D character that lives on your Windows desktop.
+A Claude-powered (or, free, Gemini-powered) Live2D or MMD character that lives on your Windows desktop.
 
 It runs in a small transparent, always-on-top window. Clicks pass through to whatever is behind it except on the character itself, so it can sit on top of your other windows.
 
@@ -29,7 +29,7 @@ INSTALL.md also covers [loading your own Live2D models, choosing or adding voice
 
 ## Using it
 
-- **First run** loads `Documents\live2d models\1014100aqua\1014100.model3.json` if it exists. Otherwise it asks you to pick a `.model3.json` file.
+- **First run** loads `Documents\live2d models\1014100aqua\1014100.model3.json` if it exists. Otherwise it asks you to pick a `.model3.json` (Live2D) or `.pmx` (MMD) file.
 - **Tray icon** (bottom right of the taskbar): *Choose model…*, *Reset position*, *Reload*, *Quit*.
 - **Right-click** her to open the same options menu as the tray icon.
 - **Drag** the character to move her. The position and size are remembered.
@@ -130,7 +130,7 @@ The app writes a log to `%LOCALAPPDATA%\com.rajieluo.desktopassistant\logs\Deskt
 
 ## Models
 
-Models are loaded from your own folder and are **never committed** to this repo (`.gitignore` blocks Live2D model files). The app only reads files inside the folder of the model you picked.
+Models are loaded from your own folder and are **never committed** to this repo (`.gitignore` blocks Live2D and MMD model files). The app only reads files inside the folder of the model you picked.
 
 Any Cubism 3/4 model (`.model3.json`) works; load one with **Choose model…** in the tray ([details](INSTALL.md#live2d-models)). Many models put all their motions in one unnamed group, so the app sorts them by file name:
 
@@ -141,10 +141,22 @@ Any Cubism 3/4 model (`.model3.json`) works; load one with **Choose model…** i
 
 The app measures where the character actually is inside the model's canvas and crops the empty space around her (Aqua has a lot below her feet), so she fills the window.
 
+### MMD models (.pmx / .pmd)
+
+Pick a `.pmx` (or older `.pmd`) file instead of a `.model3.json` and the app draws the model in 3D with [babylon-mmd](https://github.com/noname0310/babylon-mmd), on the same transparent window. Live2D models keep working as before; the 3D renderer is only downloaded when an MMD model is loaded.
+
+- **Face**: blinking, lip sync and emotions use the model's morphs, found by their usual MMD names (`まばたき` blink, `あ` mouth open, `笑い`/`にっこり` happy, `怒り` angry, `悲しむ`/`困る` sad, `びっくり` surprised, `照れ` blush…), with English fallbacks. Every morph is also listed in the poses picker to toggle on and off.
+- **Motion**: MMD models stand in a T-pose and don't come with idle animations. Put `.vmd` motion files anywhere in the model's folder: one whose name looks like an idle (`idle`, `wait`, `stand`, `breath`, `loop`…) loops on its own, emotion names (`happy.vmd`, `sad.vmd`…) play once when she feels that way, and every `.vmd` is listed under Animations in the poses picker. Without any, the app lowers her arms and adds gentle breathing and sway.
+- **Hair and clothes** swing with the model's own physics (Bullet, compiled to WebAssembly).
+- She turns her head and eyes towards the cursor, and click-through works the same as for Live2D.
+
+Check each model's readme for its terms; many MMD models allow personal use only.
+
 ## Developing
 
 - `npm run dev` serves the web part on http://localhost:1420. In a normal browser you can load a model with `?model=/path/to/model.model3.json` (relative to the repo, e.g. a model copied into `tests/fixtures/`, which is git-ignored).
 - Add `&tts=beep` to the dev URL to replace Kokoro with beeps, for testing lip sync without downloading the voice model.
+- MMD models load the same way, e.g. `?model=/dev-mmd/ellen/model.pmx` with the model folder linked under `public/dev-mmd/` (git-ignored). Add `&files=motions/idle.vmd` to try a motion.
 - `npm run fixtures` downloads Live2D's free sample model Hiyori into `tests/fixtures/` for testing.
 - `npm test` runs the web unit tests, `cargo test` (in `src-tauri/`) the Rust ones.
 
@@ -155,7 +167,8 @@ Tauri can only make a whole window ignore the mouse. So the Rust side polls the 
 ### Third-party code
 
 - [Live2D Cubism Core](https://www.live2d.com/en/sdk/license/) is downloaded at install time and is subject to the Live2D Proprietary Software License. It is free for individuals and small businesses.
-- [pixi-live2d-display](https://github.com/guansss/pixi-live2d-display) (MIT) renders the models.
+- [pixi-live2d-display](https://github.com/guansss/pixi-live2d-display) (MIT) renders the Live2D models.
+- [Babylon.js](https://github.com/BabylonJS/Babylon.js) (Apache-2.0) and [babylon-mmd](https://github.com/noname0310/babylon-mmd) (MIT) render MMD models.
 - [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT) through [whisper-rs](https://github.com/tazz4843/whisper-rs) (Unlicense) does speech to text.
 - [kokoro-js](https://www.npmjs.com/package/kokoro-js) (Apache-2.0) and the Kokoro-82M model (Apache-2.0) do text to speech.
 - [Kyutai Pocket TTS](https://github.com/kyutai-labs/pocket-tts) is optional and not bundled: you install it yourself with pip, under its own license, and its weights are gated on Hugging Face.
