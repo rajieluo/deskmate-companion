@@ -148,6 +148,14 @@ struct Turns {
     own: String,
 }
 
+/// The first mate's own reply, in the `{ id, body }` shape every "crew-reply" carries.
+fn own_reply(body: String) -> crew::Reply {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    crew::Reply { id: format!("own-{nanos}"), body }
+}
+
 impl Turns {
     /// The app's start-up message hasn't been answered yet.
     fn starting(&self) -> bool {
@@ -353,7 +361,7 @@ impl FirstMate {
                 Emit::Activity(turn, text) => app.emit("chat-activity", Activity { turn, text }),
                 Emit::Done(turn) => app.emit("chat-done", Done { turn, model: None, stop_reason: None }),
                 Emit::Error(turn, message) => app.emit("chat-error", ChatError { turn, message, kind: "crew".into() }),
-                Emit::Own(text) => app.emit("crew-reply", text),
+                Emit::Own(text) => app.emit("crew-reply", own_reply(text)),
             };
         }
     }
@@ -434,6 +442,13 @@ impl Turns {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn own_reply_payload_carries_text_in_body() {
+        let v = serde_json::to_value(own_reply("[happy] The PR merged.".into())).unwrap();
+        assert_eq!(v["body"], "[happy] The PR merged.");
+        assert!(v["id"].as_str().is_some_and(|id| !id.is_empty()));
+    }
 
     #[test]
     fn user_line_is_one_json_line() {
