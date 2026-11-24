@@ -7,7 +7,7 @@
 //!   ignores mouse events, so the page can turn click-through on and off by
 //!   hit-testing the character's pixels,
 //! * the tray menu (choose model, reset position, quit),
-//! * the Claude chat (see `chat.rs`), so the API key never reaches the page.
+//! * the Claude or Gemini chat (see `chat.rs`), so the API key never reaches the page.
 
 mod chat;
 mod claude_code;
@@ -109,7 +109,35 @@ const MODEL_CHOICES: &[(&str, &str, &str)] = &[
     ("model:claude-opus-5-5", "claude-opus-5-5", "Claude Opus 5.5 (smartest)"),
     ("model:claude-sonnet-5-5", "claude-sonnet-5-5", "Claude Sonnet 5.5"),
     ("model:claude-haiku-5-5", "claude-haiku-5-5", "Claude Haiku 5.5 (fastest, cheapest)"),
+    // Switches the provider rather than the Claude model; `gemini_model` picks the model.
+    (GEMINI_CHOICE, "gemini", "Google Gemini (free tier)"),
 ];
+const GEMINI_CHOICE: &str = "model:gemini";
+
+/// Who answers in plain chat mode, from the settings.
+fn chat_provider(s: &model::Settings) -> chat::Provider {
+    chat::Provider::from_setting(s.chat_provider.as_deref())
+}
+
+/// The model plain chat mode uses with the current provider.
+fn chat_model(s: &model::Settings) -> String {
+    match chat_provider(s) {
+        chat::Provider::Anthropic => s.chat_model.clone().unwrap_or_else(|| chat::DEFAULT_MODEL.into()),
+        chat::Provider::Gemini => s
+            .gemini_model
+            .clone()
+            .filter(|m| !m.trim().is_empty())
+            .unwrap_or_else(|| chat::DEFAULT_GEMINI_MODEL.into()),
+    }
+}
+
+/// The Chat model submenu entry that matches the settings (the model id, or "gemini").
+fn chat_choice(s: &model::Settings) -> String {
+    match chat_provider(s) {
+        chat::Provider::Gemini => "gemini".into(),
+        chat::Provider::Anthropic => chat_model(s),
+    }
+}
 
 /// The Model submenu's items, kept so the check mark can move when one is picked.
 struct ModelMenu<R: Runtime>(Vec<CheckMenuItem<R>>);
@@ -225,7 +253,10 @@ fn get_model(store: State<'_, Arc<ModelStore>>) -> Option<ModelInfo> {
 
 #[derive(Serialize)]
 struct ChatStatus {
+    /// Whether the current chat provider has a key.
     has_key: bool,
+    /// Plain chat mode's provider: "anthropic" or "gemini".
+    provider: &'static str,
     /// Hotkey labels ("" when unset or unavailable).
     hotkeys: Hotkeys,
     name: String,
@@ -339,10 +370,11 @@ fn page_log(level: String, message: String) {
 fn chat_status(store: State<'_, Arc<ModelStore>>, hotkeys: State<'_, Hotkeys>) -> ChatStatus {
     let s = store.settings();
     ChatStatus {
-        has_key: chat::get_api_key().is_some(),
+        has_key: chat::get_api_key(chat_provider(&s)).is_some(),
+        provider: chat_provider(&s).id(),
         hotkeys: hotkeys.inner().clone(),
         name: store.character_name(),
-        model: s.chat_model.unwrap_or_else(|| chat::DEFAULT_MODEL.into()),
+        model: chat_model(&s),
         voice_enabled: s.voice_enabled.unwrap_or(true),
         follow_mouse: s.follow_mouse.unwrap_or(true),
         fade_bottom: s.fade_bottom.unwrap_or(true),
@@ -358,9 +390,10 @@ fn chat_status(store: State<'_, Arc<ModelStore>>, hotkeys: State<'_, Hotkeys>) -
     }
 }
 
+/// Saves the key for the current chat provider.
 #[tauri::command]
-fn set_api_key(key: String) -> Result<(), String> {
-    chat::set_api_key(&key)
+fn set_api_key(store: State<'_, Arc<ModelStore>>, key: String) -> Result<(), String> {
+    chat::set_api_key(chat_provider(&store.settings()), &key)
 }
 
 #[tauri::command]
@@ -425,7 +458,8 @@ async fn chat_send<R: Runtime>(
         return Ok(turn);
     }
     let config = ChatConfig {
-        model: s.chat_model.unwrap_or_else(|| chat::DEFAULT_MODEL.into()),
+        provider: chat_provider(&s),
+        model: chat_model(&s),
         effort: s.chat_effort.unwrap_or_else(|| chat::DEFAULT_EFFORT.into()),
         // A persona file for this model wins; then the global `persona` setting; then the built-in one.
         persona: match character {
@@ -891,11 +925,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let crew_window = MenuItem::with_id(app, "crew_window", "Crew sessions…", true, None::<&str>)?;
     app.manage(BrainMenu { code: code.clone(), crew: crew.clone() });
     let sep3 = PredefinedMenuItem::separator(app)?;
-    let current_model = app
-        .state::<Arc<ModelStore>>()
-        .settings()
-        .chat_model
-        .unwrap_or_else(|| chat::DEFAULT_MODEL.into());
+    let current_model = chat_choice(&app.state::<Arc<ModelStore>>().settings());
     let mut model_items = Vec::new();
     for (id, model, label) in MODEL_CHOICES {
         model_items.push(CheckMenuItem::with_id(app, *id, *label, true, current_model == *model, None::<&str>)?);
@@ -1059,8 +1089,17 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 }
             }
             id if id.starts_with("model:") => {
-                let model = id.trim_start_matches("model:").to_string();
-                app.state::<Arc<ModelStore>>().update(|s| s.chat_model = Some(model.clone()));
+                let store = app.state::<Arc<ModelStore>>();
+                if id == GEMINI_CHOICE {
+                    store.update(|s| s.chat_provider = Some("gemini".into()));
+                } else {
+                    let model = id.trim_start_matches("model:").to_string();
+                    store.update(|s| {
+                        s.chat_provider = Some("anthropic".into());
+                        s.chat_model = Some(model);
+                    });
+                }
+                let model = chat_model(&store.settings());
                 if let Some(menu) = app.try_state::<ModelMenu<R>>() {
                     for (item, (item_id, _, _)) in menu.0.iter().zip(MODEL_CHOICES) {
                         let _ = item.set_checked(*item_id == id);

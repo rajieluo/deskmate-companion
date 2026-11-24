@@ -1,6 +1,6 @@
 # Desktop Assistant
 
-A Claude-powered Live2D character that lives on your Windows desktop.
+A Claude-powered (or, free, Gemini-powered) Live2D character that lives on your Windows desktop.
 
 It runs in a small transparent, always-on-top window. Clicks pass through to whatever is behind it except on the character itself, so it can sit on top of your other windows.
 
@@ -34,7 +34,8 @@ INSTALL.md also covers [loading your own Live2D models, choosing or adding voice
 - **Right-click** her to open the same options menu as the tray icon.
 - **Drag** the character to move her. The position and size are remembered.
 - **Click** her (or press **Ctrl+Shift+Space** anywhere) to open the chat box. Type and press Enter; Esc closes it.
-- The first time you chat she asks for an [Anthropic API key](https://console.anthropic.com/settings/keys). It is stored in Windows Credential Manager, never in a file. `ANTHROPIC_API_KEY` in the environment also works. *Set API key…* in the tray changes it.
+- The first time you chat she asks for an [Anthropic API key](https://console.anthropic.com/settings/keys). It is stored in Windows Credential Manager, never in a file. `ANTHROPIC_API_KEY` in the environment also works. *Set API key…* in the tray changes it. An Anthropic key needs prepaid API credits; a free Claude plan can't be used by other apps.
+- **Free option: Google Gemini.** Pick *Google Gemini (free tier)* in the tray's **Chat model** submenu (or set `"chat_provider": "gemini"`). She then asks for a Gemini API key, which you can get free at [Google AI Studio](https://aistudio.google.com/apikey): sign in with a Google account, accept the terms, and copy the key it creates. It is stored in Windows Credential Manager too (`GEMINI_API_KEY` in the environment also works), and *Set API key…* changes the key of whichever provider is picked. The free tier has per-minute and daily limits that Google sets per model (see your current ones at [aistudio.google.com/rate-limit](https://aistudio.google.com/rate-limit)); when one is used up she says so, and the daily limit resets at midnight Pacific time. Google may use free-tier chats to improve its products. Gemini only answers in plain chat mode; Claude Code mode and crew mode still need Claude. Switching provider starts a fresh conversation.
 - *Forget conversation* in the tray starts a fresh conversation.
 - **Talk to her out loud**: press the microphone button in the chat box, or **Ctrl+Alt+M** from anywhere. Speak, and she stops listening after a short pause. Your words are transcribed locally with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) and sent as a message. The first time, the Whisper model (`base.en`, about 140 MB) downloads into `%APPDATA%\com.rajieluo.desktopassistant\whisper\`. Windows may ask for microphone permission once.
 - She **speaks her replies** with [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), running locally, and her mouth follows the audio. The voice model (about 90 MB) downloads from Hugging Face the first time and is cached after that. It runs on the CPU by default (see `voice_device` below).
@@ -77,7 +78,9 @@ Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistan
 {
   "model_path": "C:\\Users\\you\\Documents\\live2d models\\1014100aqua\\1014100.model3.json",
   "character_name": null,
+  "chat_provider": "anthropic",
   "chat_model": "claude-opus-5-5",
+  "gemini_model": "gemini-3.5-flash-lite",
   "chat_effort": "low",
   "persona": null,
   "voice_enabled": true,
@@ -93,8 +96,10 @@ Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistan
 ```
 
 - `character_name`: what she calls herself. Leave it `null` to use the model's folder name, tidied up: `Nicole` stays Nicole, `1014100aqua` becomes Aqua, `mori_suit` becomes Mori Suit.
+- `chat_provider`: who answers in plain chat mode, `"anthropic"` (default, Claude) or `"gemini"` (Google Gemini, which has a free tier). The tray's **Chat model** submenu sets it too.
 - `chat_model`: any Claude model id. The tray's **Chat model** submenu switches between Opus 5.5, Sonnet 5.5 and Haiku 5.5 without editing the file. The default is Claude Opus 5.5. `claude-haiku-5-5` is much cheaper and faster if replies are good enough for you.
-- `chat_effort`: `low` (default, quick chatty replies), `medium`, `high`, `xhigh` or `max`.
+- `gemini_model`: the Gemini model id used when `chat_provider` is `"gemini"`. The default, `gemini-3.5-flash-lite`, is a stable model the free tier covers; `gemini-3.6-flash` and `gemini-3.8-flash` are also free but smarter and slower. [Google's pricing page](https://ai.google.dev/gemini-api/docs/pricing) lists which models are free.
+- `chat_effort`: `low` (default, quick chatty replies), `medium`, `high`, `xhigh` or `max`. With Gemini 3 and later models it sets the thinking level (`xhigh` and `max` both mean `XHIGH`); Gemini 2.x models ignore it.
 - `voice_enabled`, `voice`, `voice_speed`, `voice_pitch`: speech on or off, the Kokoro voice (`af_heart` by default; also `af_bella`, `af_nicole`, `af_sky`, `bf_emma` and [others](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md)), speed (0.5 to 2) and pitch (0.75 to 1.35). Speed and pitch also have sliders at the bottom of the poses panel; double-click a slider to reset it.
 - `voice_engine`: `"kokoro"` (default) or `"pocket"` for [Kyutai Pocket TTS](https://github.com/kyutai-labs/pocket-tts), which speaks in a voice cloned from a short recording and starts talking about 0.1 s after each sentence. The tray's **Voice** submenu switches between them. Pocket TTS is only used for models that have a cloned voice: `voice.safetensors` in the model folder (make it with `pocket-tts export-voice clip.wav voice.safetensors`), else `voice.wav` (10 to 30 s of clean speech; it is encoded once and cached), or `pocket_voice:` in `persona.md`'s front matter naming a file in the folder or a preset such as `alba`. Other models keep using Kokoro, and so does every sentence after Pocket TTS fails, so she never goes quiet. Speed and pitch apply to Kokoro only.
 - `pocket_python`, `pocket_quantize`: Pocket TTS runs in a Python sidecar ([setup](INSTALL.md#pocket-tts-cloned-voices)). Point `pocket_python` at the `python.exe` of a venv where you ran `pip install pocket-tts` (default: `pocket\venv\Scripts\python.exe` in the app's data folder). Voice cloning needs the gated weights: accept the terms at https://huggingface.co/kyutai/pocket-tts and run `hf auth login` once. `pocket_quantize` (default `true`) runs the model in int8, about 20% faster on the CPU.

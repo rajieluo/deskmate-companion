@@ -21,8 +21,13 @@ pub struct Settings {
     pub model_path: Option<PathBuf>,
     /// What the character calls itself. Default: taken from the model's folder name.
     pub character_name: Option<String>,
+    /// Who answers in plain chat mode: "anthropic" (Claude) or "gemini" (Google
+    /// Gemini, which has a free tier). Default: anthropic.
+    pub chat_provider: Option<String>,
     /// Claude model id. Default: claude-opus-5-5.
     pub chat_model: Option<String>,
+    /// Gemini model id, used when `chat_provider` is "gemini". Default: gemini-3.5-flash-lite.
+    pub gemini_model: Option<String>,
     /// low | medium | high | xhigh | max. Default: low (fast, cheap replies).
     pub chat_effort: Option<String>,
     /// Replaces the whole built-in persona prompt when set.

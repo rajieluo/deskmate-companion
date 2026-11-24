@@ -109,7 +109,10 @@ export async function resizeWindow(factor: number) {
 export interface ChatStatus {
   /** Global hotkey labels; "" when unset or taken by another app. */
   hotkeys: { talk: string; listen: string; mute: string };
+  /** Whether plain chat mode's provider has an API key. */
   has_key: boolean;
+  /** Who answers in plain chat mode. */
+  provider: "anthropic" | "gemini";
   name: string;
   model: string;
   voice_enabled: boolean;
@@ -212,7 +215,7 @@ export function log(level: "info" | "warn" | "error", message: string) {
 
 export async function chatStatus(): Promise<ChatStatus> {
   if (!inTauri) {
-    return { hotkeys: { talk: "Ctrl+Shift+Space", listen: "Ctrl+Alt+M", mute: "Ctrl+Alt+U" }, has_key: true, name: "Aqua", model: "demo", voice_enabled: true, follow_mouse: true, fade_bottom: true, voice: "af_heart", voice_speed: 1, voice_pitch: 1, voice_device: "cpu", voice_engine: "kokoro", pocket_voice: false, brain: "api", claude_code_folder: null, toolbar_position: new URLSearchParams(location.search).get("bar") ?? "middle" };
+    return { hotkeys: { talk: "Ctrl+Shift+Space", listen: "Ctrl+Alt+M", mute: "Ctrl+Alt+U" }, has_key: true, provider: "anthropic", name: "Aqua", model: "demo", voice_enabled: true, follow_mouse: true, fade_bottom: true, voice: "af_heart", voice_speed: 1, voice_pitch: 1, voice_device: "cpu", voice_engine: "kokoro", pocket_voice: false, brain: "api", claude_code_folder: null, toolbar_position: new URLSearchParams(location.search).get("bar") ?? "middle" };
   }
   return invoke<ChatStatus>("chat_status");
 }
