@@ -1,4 +1,5 @@
 import { Avatar } from "./avatar";
+import { modelKind, Stage } from "./character";
 import { ChatUI } from "./chat";
 import { CrewUI } from "./crew";
 import { PosePicker } from "./picker";
@@ -8,11 +9,12 @@ import { EMOTIONS } from "./motions";
 import { BeepEngine, KokoroEngine, Voice } from "./voice";
 
 const canvas = document.getElementById("stage") as HTMLCanvasElement;
+const canvas3d = document.getElementById("stage3d") as HTMLCanvasElement;
 const statusBox = document.getElementById("status") as HTMLDivElement;
 const statusText = document.getElementById("status-text") as HTMLParagraphElement;
 const statusPick = document.getElementById("status-pick") as HTMLButtonElement;
 
-const avatar = new Avatar(canvas);
+const avatar = new Stage(new Avatar(canvas), canvas, canvas3d);
 const kokoro = new KokoroEngine();
 const useBeep = !host.inTauri && new URLSearchParams(location.search).get("tts") === "beep";
 const voice = new Voice(useBeep ? new BeepEngine() : kokoro);
@@ -69,7 +71,7 @@ host.onVoiceChanged((on) => {
   else if (!useBeep) kokoro.warmUp();
 });
 // Exposed for debugging from the devtools console and for tests.
-(window as unknown as { avatar: Avatar }).avatar = avatar;
+(window as unknown as { avatar: Stage }).avatar = avatar;
 
 function showStatus(text: string | null, { pick = false } = {}) {
   statusBox.hidden = text === null;
@@ -83,20 +85,20 @@ window.addEventListener("error", (e) => host.log("error", `[page] ${e.message} a
 window.addEventListener("unhandledrejection", (e) => host.log("error", `[page] unhandled: ${String(e.reason?.stack ?? e.reason)}`));
 
 async function load(source: host.ModelSource | null) {
-  if (!("Live2DCubismCore" in window)) {
+  if (source && modelKind(source.url) === "live2d" && !("Live2DCubismCore" in window)) {
     showStatus(
       "Live2D Cubism Core is missing.\nRun `npm install` (it downloads public/vendor/live2dcubismcore.min.js) and restart.",
     );
     return;
   }
   if (!source) {
-    showStatus("No Live2D model chosen yet.\nPick a .model3.json file from your models folder.", { pick: true });
+    showStatus("No model chosen yet.\nPick a Live2D .model3.json or an MMD .pmx file from your models folder.", { pick: true });
     return;
   }
   showStatus("Loading model…");
   try {
     const files = await host.modelFiles();
-    const summary = await avatar.load(source.url, source.look, source.params, files);
+    const summary = await avatar.load(source, files);
     await poses.restore(source.label);
     showStatus(null);
     // "Above her head" depends on where her head ended up.
@@ -140,28 +142,30 @@ host.onCursor((x, y, inside) => {
   }
 });
 
-// --- Drag to move, click to react.
+// --- Drag to move, click to react (on either canvas: Live2D or MMD).
 let press: { x: number; y: number } | null = null;
-canvas.addEventListener("mousedown", (e) => {
-  if (e.button === 0) press = { x: e.clientX, y: e.clientY };
-});
-canvas.addEventListener("mousemove", (e) => {
-  if (press && e.buttons & 1 && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 4) {
+for (const stage of [canvas, canvas3d]) {
+  stage.addEventListener("mousedown", (e) => {
+    if (e.button === 0) press = { x: e.clientX, y: e.clientY };
+  });
+  stage.addEventListener("mousemove", (e) => {
+    if (press && e.buttons & 1 && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 4) {
+      press = null;
+      host.startDrag();
+    }
+  });
+  stage.addEventListener("mouseup", () => {
+    // A click (no drag) opens or closes the chat box.
+    if (press) chat.toggle();
     press = null;
-    host.startDrag();
-  }
-});
-canvas.addEventListener("mouseup", () => {
-  // A click (no drag) opens or closes the chat box.
-  if (press) chat.toggle();
-  press = null;
-});
-// Right-click on her opens the same options menu as the tray icon,
-// instead of the browser's "Copy image / Save image" menu.
-canvas.addEventListener("contextmenu", (e) => {
-  e.preventDefault();
-  host.showMenu();
-});
+  });
+  // Right-click on her opens the same options menu as the tray icon,
+  // instead of the browser's "Copy image / Save image" menu.
+  stage.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    host.showMenu();
+  });
+}
 
 // --- Ctrl + mouse wheel resizes the window (and the character with it).
 window.addEventListener(

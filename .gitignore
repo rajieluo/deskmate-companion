@@ -13,3 +13,9 @@ tests/fixtures/*
 *.model3.json
 *.motion3.json
 *.physics3.json
+# Never commit user MMD models or motions
+*.pmx
+*.pmd
+*.vmd
+*.vpd
+public/dev-mmd/

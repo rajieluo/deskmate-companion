@@ -4,6 +4,7 @@ import { blend, type ExpressionParam, type ModelActions, parseExpression, withFo
 import * as PIXI from "pixi.js";
 import { Live2DModel, MotionPriority } from "pixi-live2d-display/cubism4";
 import { alphaBounds, boxToCrop, FULL_CROP, layout, type Crop } from "./fit";
+import type { Character } from "./character";
 import { type Emotion, faceGroup, groupForEmotion, type ModelSettingsJson, regroupMotions, type MotionSummary } from "./motions";
 
 // pixi-live2d-display looks for PIXI on window for some features.
@@ -13,7 +14,7 @@ Live2DModel.registerTicker(PIXI.Ticker);
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r(null)));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export class Avatar {
+export class Avatar implements Character {
   readonly app: PIXI.Application;
   model: Live2DModel | null = null;
   private crop: Crop = FULL_CROP;
@@ -61,6 +62,7 @@ export class Avatar {
     files: string[] = [],
   ): Promise<MotionSummary> {
     const id = ++this.loadId;
+    this.app.start();
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Could not read ${url} (HTTP ${res.status})`);
     const raw = (await res.json()) as ModelSettingsJson;
@@ -103,6 +105,19 @@ export class Avatar {
     this.place();
     model.alpha = 1;
     return summary;
+  }
+
+  /** Removes the model and stops drawing (another kind of model is showing). */
+  unload() {
+    this.loadId++;
+    if (this.model) {
+      this.app.stage.removeChild(this.model);
+      this.model.destroy();
+      this.model = null;
+    }
+    this.actions = { motions: [], expressions: [] };
+    this.activeExpressions.clear();
+    this.app.stop();
   }
 
   /** Draws the whole model canvas once and records where the visible figure is. */
