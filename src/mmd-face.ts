@@ -5,6 +5,7 @@
 // the original MikuMikuDance sample models): まばたき blink, あ い う え お the
 // vowels, 笑い smiling eyes, 怒り angry brows, and so on. English and Chinese
 // names are listed as fallbacks for models that renamed them.
+import { gestureFromFile, type FaceRole, type Gesture } from "./gestures";
 import { classifyMotion, type Emotion } from "./motions";
 
 /** A morph and how strongly to apply it (0..1). */
@@ -56,10 +57,25 @@ const EMOTION_MORPHS: Record<Emotion, { names: string[]; weight: number }[]> = {
   ],
 };
 
+// The morph for each face role the built-in gestures use (see gestures.ts).
+const ROLE_MORPHS: Record<FaceRole, string[]> = {
+  smile: ["笑い", "smile", "Smile", "笑"],
+  grin: ["にっこり", "にこり", "ワ", "∧"],
+  eyesClosed: ["まばたき", "瞬き", "blink", "Blink", "眨眼"],
+  mouthA: MOUTH_OPEN,
+  mouthO: ["お", "o", "O"],
+  troubled: ["困る", "困った", "troubled"],
+  surprised: ["びっくり", "驚き", "surprised", "Surprised"],
+  blush: ["照れ", "赤面", "blush", "Blush", "脸红"],
+  sad: ["悲しむ", "悲しい", "sad", "Sad"],
+};
+
 export interface FaceRig {
   blink: string | null;
   mouth: string | null;
   emotions: Partial<Record<Emotion, MorphWeight[]>>;
+  /** The model's morph for each gesture face role it has. */
+  roles: Partial<Record<FaceRole, string>>;
 }
 
 /** Picks the blink, mouth and emotion morphs a model has. */
@@ -75,7 +91,12 @@ export function faceRig(morphs: readonly string[]): FaceRig {
     }
     if (picked.length) emotions[emotion] = picked;
   }
-  return { blink: first(BLINK), mouth: first(MOUTH_OPEN), emotions };
+  const roles: FaceRig["roles"] = {};
+  for (const [role, names] of Object.entries(ROLE_MORPHS) as [FaceRole, string[]][]) {
+    const name = first(names);
+    if (name) roles[role] = name;
+  }
+  return { blink: first(BLINK), mouth: first(MOUTH_OPEN), emotions, roles };
 }
 
 /**
@@ -106,6 +127,8 @@ export interface VmdSet {
   idle: VmdFile | null;
   /** Played once for an emotion, then back to idle. */
   emotions: Partial<Record<Emotion, VmdFile>>;
+  /** Played once for a gesture (laugh.vmd, yawn.vmd…) in place of the built-in one. */
+  gestures: Partial<Record<Gesture, VmdFile>>;
   /** Every motion, for the picker. */
   all: VmdFile[];
 }
@@ -126,14 +149,17 @@ export function sortVmds(files: readonly string[]): VmdSet {
     .sort((a, b) => byLabel.compare(a.label, b.label));
   const idles: VmdFile[] = [];
   const emotions: VmdSet["emotions"] = {};
+  const gestures: VmdSet["gestures"] = {};
   for (const v of all) {
+    const g = gestureFromFile(v.file);
+    if (g) gestures[g] ??= v;
     const kind = classifyMotion(v.file.replace(/\.vmd$/i, ""));
     if (kind.kind === "idle") idles.push(v);
     else if (kind.kind === "emotion") emotions[kind.emotion] ??= v;
   }
   // Idle packs come in styles (cool, cute, hands on hips…); start with the plain one.
   const idle = idles.find((v) => PLAIN_IDLE.test(v.label)) ?? idles[0] ?? null;
-  return { idle, emotions, all };
+  return { idle, emotions, gestures, all };
 }
 
 /** Bone names of the standard MMD skeleton the app moves itself. */
@@ -148,6 +174,8 @@ export const BONES = {
   rightArm: ["右腕", "arm_R", "RightArm", "Right arm"],
   leftElbow: ["左ひじ", "elbow_L", "LeftElbow", "Left elbow"],
   rightElbow: ["右ひじ", "elbow_R", "RightElbow", "Right elbow"],
+  leftShoulder: ["左肩", "shoulder_L", "LeftShoulder", "Left shoulder"],
+  rightShoulder: ["右肩", "shoulder_R", "RightShoulder", "Right shoulder"],
 } as const;
 
 export function findBone<T>(byName: Map<string, T>, names: readonly string[]): T | null {

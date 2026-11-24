@@ -5,6 +5,7 @@ import * as PIXI from "pixi.js";
 import { Live2DModel, MotionPriority } from "pixi-live2d-display/cubism4";
 import { alphaBounds, boxToCrop, FULL_CROP, layout, type Crop } from "./fit";
 import type { Character } from "./character";
+import { GESTURE_EMOTION, type Gesture } from "./gestures";
 import { type Emotion, faceGroup, groupForEmotion, type ModelSettingsJson, regroupMotions, type MotionSummary } from "./motions";
 
 // pixi-live2d-display looks for PIXI on window for some features.
@@ -290,6 +291,12 @@ export class Avatar implements Character {
     if (!group) return false;
     void model.motion(group, undefined, MotionPriority.FORCE);
     return true;
+  }
+
+  /** Live2D models have no gestures of their own: the nearest emotion instead. */
+  gesture(g: Gesture): boolean {
+    const e = GESTURE_EMOTION[g];
+    return e ? this.emote(e) : false;
   }
 
   /** Drives the mouth from a 0..1 level (e.g. voice loudness) every frame. */

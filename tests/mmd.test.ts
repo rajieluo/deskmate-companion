@@ -33,7 +33,7 @@ describe("faceRig", () => {
   });
 
   it("copes with a model without morphs", () => {
-    expect(faceRig([])).toEqual({ blink: null, mouth: null, emotions: {} });
+    expect(faceRig([])).toEqual({ blink: null, mouth: null, emotions: {}, roles: {} });
   });
 });
 
