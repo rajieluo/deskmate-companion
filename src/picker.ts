@@ -1,7 +1,7 @@
 // The poses & animations picker: a panel above the chat box listing the model's
 // expressions (toggle on/off, remembered per model) and motions (click to play),
 // with the voice speed and pitch sliders at the bottom.
-import type { Avatar } from "./avatar";
+import type { Character } from "./character";
 
 export interface VoiceTuning {
   readonly speed: number;
@@ -39,7 +39,7 @@ export class PosePicker {
   private model = "";
 
   constructor(
-    private avatar: Avatar,
+    private avatar: Character,
     private tuning?: VoiceTuning,
   ) {
     this.button.addEventListener("click", () => (this.panel.hidden ? this.open() : this.close()));

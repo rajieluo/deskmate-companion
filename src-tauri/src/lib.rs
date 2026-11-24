@@ -1,7 +1,7 @@
-//! Desktop Assistant: a transparent, always-on-top window with a Live2D avatar.
+//! Desktop Assistant: a transparent, always-on-top window with a Live2D or MMD avatar.
 //!
 //! The Rust side owns three things the web layer can't do on its own:
-//! * a `model://` URI scheme that serves the user's chosen Live2D model folder
+//! * a `model://` URI scheme that serves the user's chosen model folder
 //!   (only that folder, so the webview never gets general file access),
 //! * a cursor poller that tells the page where the mouse is even while the window
 //!   ignores mouse events, so the page can turn click-through on and off by
@@ -655,8 +655,8 @@ fn choose_model<R: Runtime>(app: &AppHandle<R>) -> Result<Option<ModelInfo>, Str
     let mut dialog = app
         .dialog()
         .file()
-        .set_title("Choose a Live2D model (.model3.json)")
-        .add_filter("Live2D model", &["json"]);
+        .set_title("Choose a model (Live2D .model3.json or MMD .pmx)")
+        .add_filter("Live2D or MMD model", &["json", "pmx", "pmd"]);
     if let Some(dir) = store.current_dir().and_then(|d| d.parent().map(|p| p.to_path_buf())) {
         dialog = dialog.set_directory(dir);
     }
