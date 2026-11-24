@@ -144,8 +144,10 @@ fn parse_handoff(text: &str) -> Option<Handoff> {
 }
 
 /// Where a handoff runs: its folder (absolute, or relative to `current`) if that exists, else `current`.
-pub fn handoff_folder(current: &Path, folder: Option<&str>) -> PathBuf {
-    let Some(f) = folder else { return current.to_path_buf() };
+/// A folder must be inside `current` or inside its parent (a sibling project), so a reply can't
+/// point Claude Code, which edits files without asking, at the rest of the disk.
+pub fn handoff_folder(current: &Path, folder: Option<&str>) -> Result<PathBuf, String> {
+    let Some(f) = folder else { return Ok(current.to_path_buf()) };
     let f = if let Some(rest) = f.strip_prefix("~/").or_else(|| f.strip_prefix("~\\")) {
         std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
             .map(|h| PathBuf::from(h).join(rest))
@@ -154,7 +156,30 @@ pub fn handoff_folder(current: &Path, folder: Option<&str>) -> PathBuf {
         PathBuf::from(f)
     };
     let path = if f.is_absolute() { f } else { current.join(f) };
-    if path.is_dir() { path } else { current.to_path_buf() }
+    if !path.is_dir() {
+        return Ok(current.to_path_buf());
+    }
+    if folder_allowed(current, &path) {
+        Ok(path)
+    } else {
+        Err(format!(
+            "I can only start sessions in this folder or one next to it. Pick {} with the folder button first.",
+            path.display()
+        ))
+    }
+}
+
+/// `path` is `current`, inside it, or inside `current`'s parent (but not the parent itself,
+/// which would let each hop climb one level higher).
+fn folder_allowed(current: &Path, path: &Path) -> bool {
+    let (Ok(cur), Ok(p)) = (current.canonicalize(), path.canonicalize()) else { return false };
+    if p.starts_with(&cur) {
+        return true;
+    }
+    match cur.parent() {
+        Some(root) => p.starts_with(root) && p != root,
+        None => false,
+    }
 }
 
 /// Opens a new console window running interactive Claude Code in `folder`, starting with `brief`.
@@ -206,7 +231,7 @@ opens a separate terminal window running Claude Code with the brief, which the u
 directly while this conversation carries on. Use it only when the user asks for a window or \
 terminal, or wants to keep this conversation going too.
 Either one can take folder=\"...\" after its name (absolute, or relative to the folder you're in) to \
-start in another folder. Write the brief to the new session, not to the user: what the user wants \
+start in another folder: a subfolder of the one you're in, or a folder next to it. The app refuses others. Write the brief to the new session, not to the user: what the user wants \
 and the context it needs from this conversation, since it starts with no memory of it.
 
 The app keeps a list of the Claude Code sessions on this computer (id, folder, when last used, \
@@ -450,8 +475,11 @@ impl ClaudeCode {
 
     /// Does what a reply's handoff tag asked for, and tells the page with `code-handoff`.
     fn hand_off<R: Runtime>(&self, app: &AppHandle<R>, turn: u64, h: Handoff, current: &Path) {
-        let mut folder = handoff_folder(current, h.folder.as_deref());
-        let error = match h.kind {
+        let (mut folder, blocked) = match handoff_folder(current, h.folder.as_deref()) {
+            Ok(f) => (f, None),
+            Err(e) => (current.to_path_buf(), Some(e)),
+        };
+        let error = if blocked.is_some() { blocked } else { match h.kind {
             HandoffKind::Window => open_window(&folder, &h.brief).err(),
             HandoffKind::Session => {
                 // The next message starts a new session (no --resume).
@@ -471,7 +499,7 @@ impl ClaudeCode {
                     None => Some("I couldn't find that session.".to_string()),
                 }
             }
-        };
+        } };
         if error.is_none() && h.kind != HandoffKind::Window && folder != current {
             app.state::<std::sync::Arc<crate::model::ModelStore>>()
                 .update(|s| s.claude_code_folder = Some(folder.clone()));
@@ -959,13 +987,31 @@ mod tests {
 
     #[test]
     fn handoff_folder_falls_back_to_the_current_one() {
-        let here = std::env::temp_dir();
-        assert_eq!(handoff_folder(&here, None), here);
-        assert_eq!(handoff_folder(&here, Some("no-such-folder-xyz")), here);
+        let parent = std::env::temp_dir().join("handoff-test-root");
+        let here = parent.join("project");
         let sub = here.join("handoff-folder-test");
+        let sibling = parent.join("other-project");
         std::fs::create_dir_all(&sub).unwrap();
-        assert_eq!(handoff_folder(&here, Some("handoff-folder-test")), sub);
-        assert_eq!(handoff_folder(&here, Some(sub.to_str().unwrap())), sub);
+        std::fs::create_dir_all(&sibling).unwrap();
+        assert_eq!(handoff_folder(&here, None), Ok(here.clone()));
+        assert_eq!(handoff_folder(&here, Some("no-such-folder-xyz")), Ok(here.clone()));
+        assert_eq!(handoff_folder(&here, Some("handoff-folder-test")), Ok(sub.clone()));
+        assert_eq!(handoff_folder(&here, Some(sub.to_str().unwrap())), Ok(sub.clone()));
+        assert_eq!(handoff_folder(&here, Some("../other-project")), Ok(here.join("../other-project")));
+        assert_eq!(handoff_folder(&here, Some(sibling.to_str().unwrap())), Ok(sibling.clone()));
+    }
+
+    #[test]
+    fn handoff_folder_refuses_folders_outside_the_project_area() {
+        let parent = std::env::temp_dir().join("handoff-test-root2");
+        let here = parent.join("project");
+        std::fs::create_dir_all(&here).unwrap();
+        // The parent itself, and anything above or beside it, is refused.
+        assert!(handoff_folder(&here, Some("..")).is_err());
+        assert!(handoff_folder(&here, Some(parent.to_str().unwrap())).is_err());
+        assert!(handoff_folder(&here, Some("../..")).is_err());
+        let root = if cfg!(windows) { "C:\\" } else { "/" };
+        assert!(handoff_folder(&here, Some(root)).is_err());
     }
 
     #[test]

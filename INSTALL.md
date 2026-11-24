@@ -146,6 +146,8 @@ The app uses the first of these that exists and isn't empty:
 
 Without any, `persona` in `settings.json` is used, and without that, the built-in personality. Unlike a persona file, `persona` in `settings.json` replaces the whole prompt, so it must include the reply rules and emotion tags itself. Front matter is only read from `persona.md` in the model folder, not from files in `personas\` or from `persona.txt`.
 
+**Read a downloaded model's persona first.** The persona becomes instructions to the AI, including Claude Code in Claude Code mode, which can edit files without asking. A `persona.md` or `persona.txt` that came with a model from someone else could tell it to do things you didn't ask for, so open it and read it before you load the model, or delete it and write your own.
+
 When a model loads, the app also writes its persona text to `%APPDATA%\com.rajieluo.desktopassistant\current-persona.md` for other tools such as firstmate. Don't edit that file; it's overwritten.
 
 ### Kokoro voices

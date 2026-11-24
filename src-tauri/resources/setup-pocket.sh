@@ -71,12 +71,13 @@ step '1/4  uv (downloads Python and packages)'
 if [ -x "$uv" ]; then
   echo "Already there: $uv"
 else
+  # Pinned uv release and its SHA-256, so a swapped download is refused.
   case $(uname -m) in
-    x86_64|amd64) target=x86_64-unknown-linux-gnu ;;
-    aarch64|arm64) target=aarch64-unknown-linux-gnu ;;
+    x86_64|amd64) target=x86_64-unknown-linux-gnu sha256=a7fbaff2b9a271d85c1bdb540941090fd1ce011797b4abeb48e4dcd39c2471d5 ;;
+    aarch64|arm64) target=aarch64-unknown-linux-gnu sha256=0797542018e541a9288855df555c8077eed06f7a47d206362030480e8ecc9f3d ;;
     *) fail "No uv download for this CPU ($(uname -m))" ;;
   esac
-  url=https://github.com/astral-sh/uv/releases/latest/download/uv-$target.tar.gz
+  url=https://github.com/astral-sh/uv/releases/download/0.13.9/uv-$target.tar.gz
   archive=$pocket/uv.tar.gz
   echo "Downloading $url"
   if command -v curl >/dev/null 2>&1; then
@@ -85,6 +86,11 @@ else
     wget -q -O "$archive" "$url" || fail 'Downloading uv'
   else
     fail 'Neither curl nor wget is installed (install one with your package manager)'
+  fi
+  got=$(sha256sum "$archive" 2>/dev/null || shasum -a 256 "$archive")
+  if [ "${got%% *}" != "$sha256" ]; then
+    rm -f "$archive"
+    fail "The uv download doesn't match its checksum (got ${got%% *}), so it wasn't installed"
   fi
   mkdir -p "$uv_dir" || fail "Couldn't create $uv_dir"
   tar -xzf "$archive" -C "$uv_dir" --strip-components=1 || fail 'Unpacking uv'
