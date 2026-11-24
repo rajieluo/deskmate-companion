@@ -1,4 +1,4 @@
-//! Desktop Assistant: a transparent, always-on-top window with a Live2D or MMD avatar.
+//! Deskmate Companion: a transparent, always-on-top window with a Live2D or MMD avatar.
 //!
 //! The Rust side owns three things the web layer can't do on its own:
 //! * a `model://` URI scheme that serves the user's chosen model folder
@@ -1024,7 +1024,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     app.manage(TrayMenu(menu.clone()));
 
     let mut tray = TrayIconBuilder::with_id("main")
-        .tooltip("Desktop Assistant")
+        .tooltip("Deskmate Companion")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "choose" => {
@@ -1240,7 +1240,7 @@ pub fn run() {
                 let _ = w.set_focus();
             }
         }))
-        // Log file: %LOCALAPPDATA%\com.rajieluo.desktopassistant\logs\Desktop Assistant.log on Windows,
+        // Log file: %LOCALAPPDATA%\com.rajieluo.desktopassistant\logs\Deskmate Companion.log on Windows,
         // ~/.local/share/com.rajieluo.desktopassistant/logs/ on Linux.
         .plugin(
             tauri_plugin_log::Builder::new()
@@ -1295,7 +1295,7 @@ pub fn run() {
                 log::error!("panic: {info}");
                 default_hook(info);
             }));
-            log::info!("Desktop Assistant {} starting; {}", env!("CARGO_PKG_VERSION"), stt::cpu_summary());
+            log::info!("Deskmate Companion {} starting; {}", env!("CARGO_PKG_VERSION"), stt::cpu_summary());
             let config_dir = data_dir(app)?;
             let first_run = !config_dir.join("settings.json").exists();
             let store = Arc::new(ModelStore::load(config_dir));
@@ -1416,7 +1416,7 @@ pub fn run() {
             show_menu
         ])
         .build(tauri::generate_context!())
-        .expect("error while building Desktop Assistant")
+        .expect("error while building Deskmate Companion")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 if let Some(pocket) = app.try_state::<Arc<pocket::Pocket>>() {

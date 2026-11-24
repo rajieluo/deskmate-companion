@@ -111,7 +111,7 @@ and choose **Open crew terminal** again to reattach. The crew keeps running.)
 
 The first time, tell it about your project and how changes should land, for example:
 
-> add github.com/rajieluo/desktop-assistant as a project in direct-PR mode
+> add github.com/rajieluo/deskmate-companion as a project in direct-PR mode
 
 `direct-PR` means crewmates open pull requests and never merge on their own. Don't add
 `+yolo` unless you want firstmate to merge by itself.

@@ -1,6 +1,6 @@
-# Installing Desktop Assistant
+# Installing Deskmate Companion
 
-Desktop Assistant puts an animated Live2D or MMD character on your Windows 10 or 11 desktop, or on a Linux desktop. You chat with her by typing or out loud; she answers with Google Gemini (free) or Claude (paid) and speaks her replies with a voice that runs on your PC.
+Deskmate Companion puts an animated Live2D or MMD character on your Windows 10 or 11 desktop, or on a Linux desktop. You chat with her by typing or out loud; she answers with Google Gemini (free) or Claude (paid) and speaks her replies with a voice that runs on your PC.
 
 Got the installer from a friend? Sections 1 to 5 are all you need, about 15 minutes. Sections 6 to 8 are optional extras.
 
@@ -28,7 +28,7 @@ Got the installer from a friend? Sections 1 to 5 are all you need, about 15 minu
 | Item | Required or optional | Notes |
 |---|---|---|
 | Windows 10 or 11, 64-bit | Required | WebView2, which the app runs on, is already part of Windows 10 and 11. |
-| The Desktop Assistant installer | Required | See [Install the app](#1-install-the-app). |
+| The Deskmate Companion installer | Required | See [Install the app](#1-install-the-app). |
 | A Live2D model (Cubism 3 or 4, `.model3.json`) or an MMD model (`.pmx`, `.pmd`) | Required | The app doesn't include one. See [Get a model](#2-get-a-model-and-pick-it). |
 | A Google Gemini API key (free) or an Anthropic API key with prepaid credits | Required for plain chat | See [Chat](#3-chat-gemini-free-or-claude). |
 | Internet connection | Required | For the chat itself, and for the one-time voice and Whisper model downloads. |
@@ -56,9 +56,9 @@ Got the installer from a friend? Sections 1 to 5 are all you need, about 15 minu
 
 ## 1. Install the app
 
-1. Get the installer, `Desktop Assistant_<version>_x64-setup.exe`. There are no published releases yet, so either someone who built it gives it to you, you download it from a run of the *Windows installer* workflow (repository **Actions** tab, the run's **Artifacts** section, kept for 14 days), or you [build it yourself](#building-from-source).
+1. Get the installer, `Deskmate Companion_<version>_x64-setup.exe`. There are no published releases yet, so either someone who built it gives it to you, you download it from a run of the *Windows installer* workflow (repository **Actions** tab, the run's **Artifacts** section, kept for 14 days), or you [build it yourself](#building-from-source).
 2. Run it. Windows may show **"Windows protected your PC"**, because the installer isn't code-signed. Click **More info**, then **Run anyway**.
-3. Start **Desktop Assistant** from the Start menu.
+3. Start **Deskmate Companion** from the Start menu.
 
 The app has no window of its own: look for its icon in the tray at the bottom right of the taskbar (click the **^** arrow if it's hidden). Every option is in that icon's menu, and right-clicking her opens the same menu.
 
@@ -245,7 +245,7 @@ The WSL2 route, all crew settings, and crew troubleshooting are in [docs/crew-se
 | Dances (`.vmd` and music) | `Documents\Desktop Assistant\Dances` |
 | `settings.json`, `personas\`, chat history (`history.jsonl`), downloaded voice and Whisper models, Pocket TTS (`pocket\`) | `%APPDATA%\com.rajieluo.desktopassistant\` (paste it into File Explorer's address bar) |
 | API keys | Windows Credential Manager, under `desktop-assistant` |
-| The log, `Desktop Assistant.log` | `%LOCALAPPDATA%\com.rajieluo.desktopassistant\logs\` |
+| The log, `Deskmate Companion.log` | `%LOCALAPPDATA%\com.rajieluo.desktopassistant\logs\` |
 
 Edit `settings.json` only while the app is closed; it's rewritten when the app saves. To uninstall, use **Settings > Apps** in Windows, then delete the `%APPDATA%` and `%LOCALAPPDATA%` folders above (`com.rajieluo.desktopassistant` in each) if you also want your settings, history, downloads, browser cache and log gone. The Hugging Face login is in `%USERPROFILE%\.cache\huggingface\` and is shared with any other Hugging Face tools you use.
 
@@ -267,13 +267,13 @@ Everything in sections 2 to 8 works on Linux too. This section covers what's dif
 
 You get one of two files (from whoever built it, or from a run of the *Linux bundle* workflow: repository **Actions** tab, the run's **Artifacts** section):
 
-- **AppImage** (any distro): `Desktop Assistant_<version>_amd64.AppImage`. Make it runnable and start it:
+- **AppImage** (any distro): `Deskmate Companion_<version>_amd64.AppImage`. Make it runnable and start it:
   ```bash
-  chmod +x "Desktop Assistant_0.1.0_amd64.AppImage"
-  ./"Desktop Assistant_0.1.0_amd64.AppImage"
+  chmod +x "Deskmate Companion_0.1.0_amd64.AppImage"
+  ./"Deskmate Companion_0.1.0_amd64.AppImage"
   ```
   On Ubuntu 22.04 and newer, AppImages need FUSE 2 once: `sudo apt install libfuse2` (`libfuse2t64` on Ubuntu 24.04). Keep the AppImage somewhere permanent, such as `~/Applications/`.
-- **.deb** (Ubuntu, Debian, Mint, Pop!_OS): `sudo apt install "./Desktop Assistant_0.1.0_amd64.deb"`, then start **Desktop Assistant** from the app menu. It installs its few dependencies (WebKitGTK, the tray library and GStreamer audio plugins) itself.
+- **.deb** (Ubuntu, Debian, Mint, Pop!_OS): `sudo apt install "./Deskmate Companion_0.1.0_amd64.deb"`, then start **Deskmate Companion** from the app menu. It installs its few dependencies (WebKitGTK, the tray library and GStreamer audio plugins) itself.
 
 Then continue with [section 2](#2-get-a-model-and-pick-it). Put model folders anywhere, for example `~/avatars/Hiyori/`.
 
@@ -284,7 +284,7 @@ Then continue with [section 2](#2-get-a-model-and-pick-it). Put model folders an
 - **Wayland**: the app runs itself through XWayland, because native Wayland doesn't let an app stay on top, place its own window, follow the mouse outside its window or use global hotkeys. You don't need to do anything. To try native Wayland anyway, start it with `DESKTOP_ASSISTANT_WAYLAND=1`.
 - **Microphone**: the app uses your default input device (PipeWire or PulseAudio). Choose it in your desktop's sound settings.
 - **GPU voice** (`"voice_device": "gpu"`) is Windows only (DirectML). On Linux the voice always runs on the CPU, which is the default anyway.
-- **Pocket TTS**: **Voice > Set up Pocket TTS…** opens a terminal window running `setup-pocket.sh`, which does the same steps as on Windows: uv, a private Python 3.12 and the CPU build of PyTorch, all in `~/.local/share/com.rajieluo.desktopassistant/pocket/`. It needs `curl` or `wget`. You can also run it yourself: `bash setup-pocket.sh --data-dir <folder> [--no-login]`; the script is in `/usr/lib/Desktop Assistant/` for the `.deb`. For a manual setup, the venv's Python is `pocket/venv/bin/python` (not `Scripts\python.exe`):
+- **Pocket TTS**: **Voice > Set up Pocket TTS…** opens a terminal window running `setup-pocket.sh`, which does the same steps as on Windows: uv, a private Python 3.12 and the CPU build of PyTorch, all in `~/.local/share/com.rajieluo.desktopassistant/pocket/`. It needs `curl` or `wget`. You can also run it yourself: `bash setup-pocket.sh --data-dir <folder> [--no-login]`; the script is in `/usr/lib/Deskmate Companion/` for the `.deb`. For a manual setup, the venv's Python is `pocket/venv/bin/python` (not `Scripts\python.exe`):
   ```bash
   venv=~/.local/share/com.rajieluo.desktopassistant/pocket/venv
   python3 -m venv "$venv"
@@ -293,7 +293,7 @@ Then continue with [section 2](#2-get-a-model-and-pick-it). Put model folders an
   ```
 - **Claude Code mode**: install Claude Code with the [native installer](https://docs.claude.com/en/docs/claude-code/setup) (it goes to `~/.local/bin/claude`, which the app finds even when it's not on the desktop's `PATH`). The app also looks on `PATH`, in `~/.claude/local`, `~/.npm-global/bin` and `/usr/local/bin`. An npm install through nvm usually isn't visible to apps started from the menu; the native installer avoids that. **New Claude Code window** opens one in your terminal app.
 - **Crew mode**: use upstream [firstmate](https://github.com/kunchenguid/firstmate) directly, no Git Bash or WSL: install its requirements (git, gh, jq, tmux, Node.js, Claude Code), clone it to `~/firstmate` (or set `crew_home`), do its setup, then tick **Crew mode (firstmate)**. The app runs firstmate's scripts with `bash --login`, and **Open crew terminal** opens its tmux session in your terminal app. Ignore the Windows-only steps in section 8 and docs/crew-setup.md (Developer Mode, Herdr, PowerShell, WSL).
-- **Uninstall**: delete the AppImage, or `sudo apt remove desktop-assistant`. Then delete `~/.local/share/com.rajieluo.desktopassistant/` (and `~/.cache/com.rajieluo.desktopassistant/`, the browser cache) if you want your settings and downloads gone.
+- **Uninstall**: delete the AppImage, or `sudo apt remove deskmate-companion`. Then delete `~/.local/share/com.rajieluo.desktopassistant/` (and `~/.cache/com.rajieluo.desktopassistant/`, the browser cache) if you want your settings and downloads gone.
 
 ### Build it on Linux
 
@@ -326,7 +326,7 @@ An AppImage only runs on distros whose glibc is at least as new as the build mac
 
 Give them the installer and a link to this file. Nothing else: they bring their own model, key and voice.
 
-1. Build the installer ([Building from source](#building-from-source)): `npm install`, then `npm run tauri build`. It lands in `src-tauri\target\release\bundle\nsis\Desktop Assistant_<version>_x64-setup.exe`. (The *Windows installer* workflow builds the same file but uses Actions minutes.)
+1. Build the installer ([Building from source](#building-from-source)): `npm install`, then `npm run tauri build`. It lands in `src-tauri\target\release\bundle\nsis\Deskmate Companion_<version>_x64-setup.exe`. (The *Windows installer* workflow builds the same file but uses Actions minutes.)
 2. Send them that one `.exe`. Your models, personas, voices, `settings.json`, chat history and API keys stay on your PC: they live in your model folders, `%APPDATA%\com.rajieluo.desktopassistant\` and Credential Manager, none of which go into the installer.
 3. They follow sections 1 to 5, with their own Gemini or Anthropic key, and for Pocket TTS cloning their own Hugging Face account.
 
@@ -366,7 +366,7 @@ npm run tauri dev    # run the app with hot reload
 npm run tauri build  # build an installer in src-tauri/target/release/bundle/nsis
 ```
 
-The first Rust build takes several minutes (it compiles whisper.cpp and Tauri), seconds after that. Quit the installed Desktop Assistant before `npm run tauri dev` or before starting a built exe: only one copy runs at a time, and a second launch just brings the running one forward.
+The first Rust build takes several minutes (it compiles whisper.cpp and Tauri), seconds after that. Quit the installed Deskmate Companion before `npm run tauri dev` or before starting a built exe: only one copy runs at a time, and a second launch just brings the running one forward.
 
 Debugging tips:
 
@@ -376,7 +376,7 @@ Debugging tips:
 
 ## Troubleshooting
 
-- **Where's the log?** `%LOCALAPPDATA%\com.rajieluo.desktopassistant\logs\Desktop Assistant.log`.
+- **Where's the log?** `%LOCALAPPDATA%\com.rajieluo.desktopassistant\logs\Deskmate Companion.log`.
 - **It closes without a message.** Windows records the crash: open Event Viewer, go to *Windows Logs > Application*, and look for an "Application Error" for `desktop-assistant.exe`. The exception code says what kind of crash it was (for example `0xc000001d`, an illegal instruction).
 - **"Speech input needs a CPU with AVX2"**: this PC's CPU can't run whisper.cpp. Typing and spoken replies still work.
 - **The GPU voice sounds garbled.** On some graphics cards (an RX 7900 XT, for one) the GPU garbles Kokoro's speech. In the app the GPU voice runs on DirectML, and the app doesn't detect garbling there: set `"voice_device": "cpu"` in `settings.json` with the app closed. (Only the slower built-in voice, used when the app's native voice won't load, notices garbled WebGPU output and switches to the CPU by itself.)

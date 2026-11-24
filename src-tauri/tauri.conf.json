@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Desktop Assistant",
+  "productName": "Deskmate Companion",
   "version": "0.1.0",
   "identifier": "com.rajieluo.desktopassistant",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Desktop Assistant",
+        "title": "Deskmate Companion",
         "width": 380,
         "height": 720,
         "transparent": true,

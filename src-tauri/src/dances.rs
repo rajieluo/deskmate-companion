@@ -27,7 +27,7 @@ pub struct Dance {
 }
 
 pub const README: &str = "\
-Dances for Desktop Assistant
+Dances for Deskmate Companion
 ============================
 
 Ask an MMD (.pmx) character to dance in chat (\"dance\", \"can you dance?\",
