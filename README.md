@@ -132,7 +132,7 @@ Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistan
 
 ```json
 {
-  "model_path": "C:\\Users\\you\\Documents\\live2d models\\1014100aqua\\1014100.model3.json",
+  "model_path": "C:\\Users\\you\\Documents\\live2d models\\MyModel\\MyModel.model3.json",
   "character_name": null,
   "chat_provider": "anthropic",
   "chat_model": "claude-opus-5-5",
