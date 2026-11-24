@@ -1,9 +1,9 @@
-# Crew mode: Aqua as the face of firstmate
+# Crew mode: your avatar as the face of firstmate
 
-In Crew mode you talk to Aqua, and she passes what you say to firstmate. Firstmate is a
+In Crew mode you talk to your avatar, and she passes what you say to firstmate. Firstmate is a
 Claude Code session (the "first mate") that starts and supervises a crew of other Claude
 Code sessions, each in its own git worktree, and brings back pull requests or reports.
-Aqua reads its replies out loud and shows a badge beside her for each task.
+She reads its replies out loud and shows a badge beside her for each task.
 
 There are two ways to run firstmate on Windows:
 
@@ -104,7 +104,7 @@ and says so. Delete the file to go back to the default.
 
 ## 4. Start the first mate
 
-In Aqua's tray menu choose **Open crew terminal**. A console window opens a tmux
+In the tray menu choose **Open crew terminal**. A console window opens a tmux
 session called `firstmate`, with Claude Code running in `~/firstmate`. Each crewmate
 gets its own tmux window there, so you can always watch or step in. (Close the window
 and choose **Open crew terminal** again to reattach. The crew keeps running.)
@@ -135,7 +135,7 @@ Tick **Crew mode (firstmate)** in the tray. The text box gets a blue border.
 - **She speaks up by herself only when something needs you**: a task needs a decision
   or is blocked, a task failed, a PR is ready, or a PR was merged.
 
-To answer a decision, reply through Aqua ("for fix login, keep the old API") or type in
+To answer a decision, reply through your avatar ("for fix login, keep the old API") or type in
 the firstmate terminal.
 
 The first time Crew mode runs, the app creates `~/firstmate/config/fleet-ledger`. That

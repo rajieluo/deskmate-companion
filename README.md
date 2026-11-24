@@ -132,7 +132,7 @@ Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistan
 
 ```json
 {
-  "model_path": "C:\\Users\\you\\Documents\\live2d models\\1014100aqua\\1014100.model3.json",
+  "model_path": "C:\\Users\\you\\Documents\\live2d models\\MyModel\\MyModel.model3.json",
   "character_name": null,
   "chat_provider": "anthropic",
   "chat_model": "claude-opus-5-5",
@@ -246,6 +246,10 @@ Ask an MMD character to dance in chat, typed or out loud, and she dances once, t
 ### How click-through works
 
 Tauri can only make a whole window ignore the mouse. So the Rust side polls the global cursor position about 30 times a second and sends it to the page. The page reads the alpha of the pixel under the cursor; over the character (or any element marked `data-hit`) it turns mouse events on, elsewhere it turns them off.
+
+## License
+
+The app's own code is under the [MIT License](LICENSE). That covers this repository only: Live2D Cubism Core, Live2D or MMD models, motions and voices keep their own licenses and are never part of it.
 
 ### Third-party code
 

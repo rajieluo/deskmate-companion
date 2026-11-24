@@ -158,7 +158,7 @@ const browserHistory: HistoryEntry[] = [];
 export function historyAppend(role: "user" | "assistant", text: string) {
   if (!text.trim()) return;
   if (inTauri) void invoke("history_append", { role, text }).catch((e) => console.warn("[history]", e));
-  else browserHistory.push({ time: Date.now(), role, text, name: "Aqua", mode: "api" });
+  else browserHistory.push({ time: Date.now(), role, text, name: "Avatar", mode: "api" });
 }
 
 export async function historyRead(): Promise<HistoryEntry[]> {
@@ -235,7 +235,7 @@ export function log(level: "info" | "warn" | "error", message: string) {
 
 export async function chatStatus(): Promise<ChatStatus> {
   if (!inTauri) {
-    return { hotkeys: { talk: "Ctrl+Shift+Space", listen: "Ctrl+Alt+M", mute: "Ctrl+Alt+U" }, has_key: true, provider: "anthropic", name: "Aqua", model: "demo", voice_enabled: true, follow_mouse: true, fade_bottom: true, voice: "af_heart", voice_speed: 1, voice_pitch: 1, voice_device: "cpu", voice_engine: "kokoro", pocket_voice: false, brain: "api", claude_code_folder: null, toolbar_position: new URLSearchParams(location.search).get("bar") ?? "middle" };
+    return { hotkeys: { talk: "Ctrl+Shift+Space", listen: "Ctrl+Alt+M", mute: "Ctrl+Alt+U" }, has_key: true, provider: "anthropic", name: "Avatar", model: "demo", voice_enabled: true, follow_mouse: true, fade_bottom: true, voice: "af_heart", voice_speed: 1, voice_pitch: 1, voice_device: "cpu", voice_engine: "kokoro", pocket_voice: false, brain: "api", claude_code_folder: null, toolbar_position: new URLSearchParams(location.search).get("bar") ?? "middle" };
   }
   return invoke<ChatStatus>("chat_status");
 }
