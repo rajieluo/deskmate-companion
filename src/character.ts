@@ -2,6 +2,7 @@
 // the MMD (3D) avatar each draw on their own canvas; Stage shows the one that
 // fits the chosen model file and forwards every call to it.
 import type { Avatar } from "./avatar";
+import type { DanceMotion } from "./dance";
 import type { MmdAvatar } from "./mmd";
 import type { Emotion, MotionSummary } from "./motions";
 import type { ModelActions } from "./poses";
@@ -24,6 +25,11 @@ export interface Character {
   isExpressionOn(file: string): boolean;
   toggleExpression(file: string, on?: boolean): Promise<boolean>;
   diagnostics(): Promise<string>;
+  /** Dances once (null: the built-in dance). False if this kind of model can't. */
+  dance(motion: DanceMotion | null): Promise<boolean>;
+  stopDance(): void;
+  /** Whether it can dance at all (MMD models can). */
+  readonly canDance: boolean;
 }
 
 export type ModelKind = "live2d" | "mmd";
@@ -137,5 +143,14 @@ export class Stage implements Character {
   }
   diagnostics() {
     return this.active?.diagnostics() ?? Promise.resolve("no model");
+  }
+  get canDance() {
+    return this.active?.canDance ?? false;
+  }
+  dance(motion: DanceMotion | null) {
+    return this.active?.dance(motion) ?? Promise.resolve(false);
+  }
+  stopDance() {
+    this.active?.stopDance();
   }
 }

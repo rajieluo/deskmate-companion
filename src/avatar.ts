@@ -315,6 +315,13 @@ export class Avatar implements Character {
    * parameters' values as the next frame is drawn (so "mouth stuck open" can be
    * told apart from art that just looks open).
    */
+  // Live2D models don't dance (yet): their motions are made for each model.
+  readonly canDance = false;
+  dance(): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+  stopDance() {}
+
   diagnostics(): Promise<string> {
     const model = this.model;
     if (!model) return Promise.resolve("no model");
