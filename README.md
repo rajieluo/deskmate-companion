@@ -1,6 +1,6 @@
 # Desktop Assistant
 
-A Claude-powered (or, free, Gemini-powered) Live2D or MMD character that lives on your Windows desktop.
+A Claude-powered (or, free, Gemini-powered) Live2D or MMD character that lives on your Windows desktop. It runs on Linux too: see [INSTALL.md](INSTALL.md#linux).
 
 It runs in a small transparent, always-on-top window. Clicks pass through to whatever is behind it except on the character itself, so it can sit on top of your other windows.
 

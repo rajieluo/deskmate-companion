@@ -1,8 +1,10 @@
 # Installing Desktop Assistant
 
-Desktop Assistant puts an animated Live2D or MMD character on your Windows 10 or 11 desktop. You chat with her by typing or out loud; she answers with Google Gemini (free) or Claude (paid) and speaks her replies with a voice that runs on your PC.
+Desktop Assistant puts an animated Live2D or MMD character on your Windows 10 or 11 desktop, or on a Linux desktop. You chat with her by typing or out loud; she answers with Google Gemini (free) or Claude (paid) and speaks her replies with a voice that runs on your PC.
 
 Got the installer from a friend? Sections 1 to 5 are all you need, about 15 minutes. Sections 6 to 8 are optional extras.
+
+**On Linux?** Read [Linux](#linux) first: it says how to install the AppImage or `.deb`, and what's different in sections 1 to 8 (mostly folder names).
 
 - [Requirements](#requirements)
 - [1. Install the app](#1-install-the-app)
@@ -14,6 +16,7 @@ Got the installer from a friend? Sections 1 to 5 are all you need, about 15 minu
 - [7. Optional: Claude Code mode](#7-optional-claude-code-mode)
 - [8. Optional: Crew mode (firstmate)](#8-optional-crew-mode-firstmate)
 - [Where everything lives](#where-everything-lives)
+- [Linux](#linux)
 - [Sharing the app with a friend](#sharing-the-app-with-a-friend)
 - [Building from source](#building-from-source)
 - [Troubleshooting](#troubleshooting)
@@ -243,6 +246,79 @@ The WSL2 route, all crew settings, and crew troubleshooting are in [docs/crew-se
 
 Edit `settings.json` only while the app is closed; it's rewritten when the app saves. To uninstall, use **Settings > Apps** in Windows, then delete the `%APPDATA%` and `%LOCALAPPDATA%` folders above (`com.rajieluo.desktopassistant` in each) if you also want your settings, history, downloads, browser cache and log gone. The Hugging Face login is in `%USERPROFILE%\.cache\huggingface\` and is shared with any other Hugging Face tools you use.
 
+## Linux
+
+Everything in sections 2 to 8 works on Linux too. This section covers what's different. Tested on Ubuntu; other distros with a desktop (GNOME, KDE, Xfce, Cinnamon…) should work the same.
+
+### Linux requirements
+
+| Item | Required or optional | Notes |
+|---|---|---|
+| 64-bit Linux (x86_64) with a graphical desktop | Required | The AppImage built by the *Linux bundle* workflow needs glibc 2.35 or newer: Ubuntu 22.04+, Debian 12+, Fedora 36+, Mint 21+, or any current Arch. |
+| A desktop compositor | Required | For her see-through background. GNOME, KDE and Cinnamon always have one; on Xfce turn on *Window Manager Tweaks > Compositor*. Without one she shows on a black box. |
+| A keyring (GNOME Keyring or KWallet) | Recommended | Where your API key is saved. Without one, set `GEMINI_API_KEY` or `ANTHROPIC_API_KEY` in your environment instead. |
+| A terminal app | For Pocket TTS setup, Claude Code windows and the crew terminal | Any of the usual ones (gnome-terminal, konsole, xfce4-terminal, kitty, alacritty, xterm…), or set `TERMINAL` to yours. |
+| A tray that shows app icons | Recommended | KDE, Xfce, Cinnamon and Ubuntu's GNOME show them. Stock GNOME (Fedora, Debian) needs the [AppIndicator extension](https://extensions.gnome.org/extension/615/appindicator-support/). Without a tray, right-click her for the same menu. |
+
+### Install on Linux
+
+You get one of two files (from whoever built it, or from a run of the *Linux bundle* workflow: repository **Actions** tab, the run's **Artifacts** section):
+
+- **AppImage** (any distro): `Desktop Assistant_<version>_amd64.AppImage`. Make it runnable and start it:
+  ```bash
+  chmod +x "Desktop Assistant_0.1.0_amd64.AppImage"
+  ./"Desktop Assistant_0.1.0_amd64.AppImage"
+  ```
+  On Ubuntu 22.04 and newer, AppImages need FUSE 2 once: `sudo apt install libfuse2` (`libfuse2t64` on Ubuntu 24.04). Keep the AppImage somewhere permanent, such as `~/Applications/`.
+- **.deb** (Ubuntu, Debian, Mint, Pop!_OS): `sudo apt install "./Desktop Assistant_0.1.0_amd64.deb"`, then start **Desktop Assistant** from the app menu. It installs its few dependencies (WebKitGTK, the tray library and GStreamer audio plugins) itself.
+
+Then continue with [section 2](#2-get-a-model-and-pick-it). Put model folders anywhere, for example `~/avatars/Hiyori/`.
+
+### What's different on Linux
+
+- **Folders**: wherever this guide says `%APPDATA%\com.rajieluo.desktopassistant\`, use `~/.local/share/com.rajieluo.desktopassistant/`. The log is in `~/.local/share/com.rajieluo.desktopassistant/logs/`, and the Hugging Face login in `~/.cache/huggingface/`. Paths in `settings.json` use `/`.
+- **API keys** go in your desktop's keyring (look for `desktop-assistant` in *Passwords and Keys* / *Seahorse*, or KWallet) instead of Windows Credential Manager. `GEMINI_API_KEY` and `ANTHROPIC_API_KEY` still take priority.
+- **Wayland**: the app runs itself through XWayland, because native Wayland doesn't let an app stay on top, place its own window, follow the mouse outside its window or use global hotkeys. You don't need to do anything. To try native Wayland anyway, start it with `DESKTOP_ASSISTANT_WAYLAND=1`.
+- **Microphone**: the app uses your default input device (PipeWire or PulseAudio). Choose it in your desktop's sound settings.
+- **GPU voice** (`"voice_device": "gpu"`) is Windows only (DirectML). On Linux the voice always runs on the CPU, which is the default anyway.
+- **Pocket TTS**: **Voice > Set up Pocket TTS…** opens a terminal window running `setup-pocket.sh`, which does the same steps as on Windows: uv, a private Python 3.12 and the CPU build of PyTorch, all in `~/.local/share/com.rajieluo.desktopassistant/pocket/`. It needs `curl` or `wget`. You can also run it yourself: `bash setup-pocket.sh --data-dir <folder> [--no-login]`; the script is in `/usr/lib/Desktop Assistant/` for the `.deb`. For a manual setup, the venv's Python is `pocket/venv/bin/python` (not `Scripts\python.exe`):
+  ```bash
+  venv=~/.local/share/com.rajieluo.desktopassistant/pocket/venv
+  python3 -m venv "$venv"
+  "$venv/bin/python" -m pip install pocket-tts huggingface_hub
+  "$venv/bin/hf" auth login   # for cloning; accept the model's terms first
+  ```
+- **Claude Code mode**: install Claude Code with the [native installer](https://docs.claude.com/en/docs/claude-code/setup) (it goes to `~/.local/bin/claude`, which the app finds even when it's not on the desktop's `PATH`). The app also looks on `PATH`, in `~/.claude/local`, `~/.npm-global/bin` and `/usr/local/bin`. An npm install through nvm usually isn't visible to apps started from the menu; the native installer avoids that. **New Claude Code window** opens one in your terminal app.
+- **Crew mode**: use upstream [firstmate](https://github.com/kunchenguid/firstmate) directly, no Git Bash or WSL: install its requirements (git, gh, jq, tmux, Node.js, Claude Code), clone it to `~/firstmate` (or set `crew_home`), do its setup, then tick **Crew mode (firstmate)**. The app runs firstmate's scripts with `bash --login`, and **Open crew terminal** opens its tmux session in your terminal app. Ignore the Windows-only steps in section 8 and docs/crew-setup.md (Developer Mode, Herdr, PowerShell, WSL).
+- **Uninstall**: delete the AppImage, or `sudo apt remove desktop-assistant`. Then delete `~/.local/share/com.rajieluo.desktopassistant/` (and `~/.cache/com.rajieluo.desktopassistant/`, the browser cache) if you want your settings and downloads gone.
+
+### Build it on Linux
+
+On Debian or Ubuntu (other distros: the [Tauri prerequisites for Linux](https://v2.tauri.app/start/prerequisites/#linux) list the same packages by their names there):
+
+```bash
+sudo apt install build-essential curl file cmake clang patchelf \
+  libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libdbus-1-dev libxdo-dev \
+  gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-pulseaudio
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh   # Rust
+# and Node.js 22+ (from nodejs.org, nvm or your distro)
+
+npm install          # also downloads the Live2D Cubism Core runtime
+npm run tauri dev    # run the app with hot reload
+npm run tauri build  # AppImage and .deb in src-tauri/target/release/bundle/
+```
+
+An AppImage only runs on distros whose glibc is at least as new as the build machine's, so to share one widely, build it on an older distro (the *Linux bundle* workflow uses Ubuntu 22.04).
+
+### Linux troubleshooting
+
+- **She sits on a black box.** Your desktop has no compositor running; turn it on (Xfce: *Window Manager Tweaks > Compositor*), or use a desktop that has one.
+- **The window is blank or white.** Usually a graphics driver problem in WebKitGTK. The app already sets `WEBKIT_DISABLE_DMABUF_RENDERER=1`; if it's still blank, also try starting it with `WEBKIT_DISABLE_COMPOSITING_MODE=1`.
+- **No tray icon.** See the tray row in [Linux requirements](#linux-requirements); right-clicking her opens the same menu.
+- **"Couldn't run bash" or "couldn't find a terminal app"**: install bash or a terminal app, or set `TERMINAL` (for example `TERMINAL=kitty`) in the environment the app starts in.
+- **Saving the API key fails.** No keyring is running. Install and unlock GNOME Keyring or KWallet, or set `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` in `~/.profile` and log in again.
+- **No sound, or the microphone doesn't work.** The `.deb` installs the GStreamer plugins the webview plays and records audio with; the AppImage carries its own. Check the default output and input devices in your sound settings.
+
 ## Sharing the app with a friend
 
 Give them the installer and a link to this file. Nothing else: they bring their own model, key and voice.
@@ -250,6 +326,8 @@ Give them the installer and a link to this file. Nothing else: they bring their 
 1. Build the installer ([Building from source](#building-from-source)): `npm install`, then `npm run tauri build`. It lands in `src-tauri\target\release\bundle\nsis\Desktop Assistant_<version>_x64-setup.exe`. (The *Windows installer* workflow builds the same file but uses Actions minutes.)
 2. Send them that one `.exe`. Your models, personas, voices, `settings.json`, chat history and API keys stay on your PC: they live in your model folders, `%APPDATA%\com.rajieluo.desktopassistant\` and Credential Manager, none of which go into the installer.
 3. They follow sections 1 to 5, with their own Gemini or Anthropic key, and for Pocket TTS cloning their own Hugging Face account.
+
+**A friend on Linux** needs the AppImage or `.deb` instead: run the *Linux bundle* workflow (Actions tab > *Linux bundle* > *Run workflow*, about 15 minutes of Actions time) and send them the AppImage from the run's Artifacts, or build it on a Linux PC ([Build it on Linux](#build-it-on-linux)). They follow [Linux](#linux), then sections 2 to 5.
 
 Before passing on a model or a voice too:
 

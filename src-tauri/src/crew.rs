@@ -953,22 +953,31 @@ impl Crew {
     pub fn open_terminal<R: Runtime>(&self, app: &AppHandle<R>) -> Result<(), String> {
         let config = CrewConfig::from_settings(&app.state::<std::sync::Arc<ModelStore>>());
         let helper = helper_path(app)?;
-        if !cfg!(windows) {
-            return Err("Opening the crew terminal is only supported on Windows.".into());
-        }
         let (program, pre) = helper_argv(&helper, &config);
-        let mut cmd = std::process::Command::new(program);
-        cmd.args(pre).arg(&config.home).arg("open");
         // When she is the first mate, the terminal is only for watching the crew.
-        if crate::firstmate::direct(&app.state::<std::sync::Arc<ModelStore>>()) {
-            cmd.arg("watch");
+        let watch = crate::firstmate::direct(&app.state::<std::sync::Arc<ModelStore>>());
+        #[cfg(not(windows))]
+        {
+            // Linux: in a new terminal window.
+            let mut args: Vec<std::ffi::OsString> = pre.into_iter().map(Into::into).collect();
+            args.push(config.home.clone().into());
+            args.push("open".into());
+            if watch {
+                args.push("watch".into());
+            }
+            crate::terminal::open(&program, &args, None)
         }
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
+            let mut cmd = std::process::Command::new(program);
+            cmd.args(pre).arg(&config.home).arg("open");
+            if watch {
+                cmd.arg("watch");
+            }
             cmd.creation_flags(0x0000_0010); // CREATE_NEW_CONSOLE
+            cmd.spawn().map(|_| ()).map_err(|e| format!("Couldn't open the crew terminal: {e}"))
         }
-        cmd.spawn().map(|_| ()).map_err(|e| format!("Couldn't open the crew terminal: {e}"))
     }
 }
 

@@ -95,8 +95,9 @@ get in the way of the facts."
         ),
         None => "You are warm, playful and a little dramatic, but genuinely helpful when asked for help.".into(),
     };
+    let os = if cfg!(windows) { "Windows" } else if cfg!(target_os = "macos") { "Mac" } else { "Linux" };
     format!(
-        "You are {name}, a small animated character who lives on the user's Windows desktop \
+        "You are {name}, a small animated character who lives on the user's {os} desktop \
 and chats with them while they work. {character}\n\n\
 How to reply:\n\
 - Keep replies short: one to three sentences, like talking out loud. Only go longer \
@@ -156,7 +157,8 @@ impl Default for Chat {
     }
 }
 
-/// The key for `provider`: from its environment variable, else Windows Credential Manager.
+/// The key for `provider`: from its environment variable, else the OS keyring
+/// (Windows Credential Manager, or the Secret Service on Linux).
 pub fn get_api_key(provider: Provider) -> Option<String> {
     if let Ok(key) = std::env::var(provider.env_var()) {
         if !key.trim().is_empty() {
@@ -166,14 +168,23 @@ pub fn get_api_key(provider: Provider) -> Option<String> {
     keyring::Entry::new(KEYRING_SERVICE, provider.keyring_user()).ok()?.get_password().ok()
 }
 
-/// Saves `provider`'s key in Windows Credential Manager (an empty key deletes it).
+/// Saves `provider`'s key in the OS keyring (an empty key deletes it).
 pub fn set_api_key(provider: Provider, key: &str) -> Result<(), String> {
     let entry = keyring::Entry::new(KEYRING_SERVICE, provider.keyring_user()).map_err(|e| e.to_string())?;
     if key.trim().is_empty() {
         let _ = entry.delete_credential();
         Ok(())
     } else {
-        entry.set_password(key.trim()).map_err(|e| e.to_string())
+        entry.set_password(key.trim()).map_err(|e| {
+            if cfg!(target_os = "linux") {
+                format!(
+                    "{e}. Is a keyring (GNOME Keyring or KWallet) running? Without one, set {} in your environment instead.",
+                    provider.env_var()
+                )
+            } else {
+                e.to_string()
+            }
+        })
     }
 }
 

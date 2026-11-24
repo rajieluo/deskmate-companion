@@ -77,7 +77,12 @@ export class ChatUI {
     });
     this.keyForm.addEventListener("submit", async (e) => {
       e.preventDefault();
-      await host.setApiKey(this.keyInput.value);
+      try {
+        await host.setApiKey(this.keyInput.value);
+      } catch (err) {
+        this.say(`I couldn't save that key: ${err}`);
+        return;
+      }
       this.keyInput.value = "";
       this.keyForm.hidden = true;
       this.keyForm.removeAttribute("data-hit");
@@ -340,7 +345,7 @@ export class ChatUI {
       provider === "gemini"
         ? "I need a Google Gemini API key to talk. Get a free one at https://aistudio.google.com/apikey and paste it below"
         : "I need an Anthropic API key to talk. Paste one below";
-    this.say(`${reason ? reason + " " : ""}${need} (it's stored in Windows Credential Manager).`);
+    this.say(`${reason ? reason + " " : ""}${need} (it's stored in ${keyStore()}).`);
     this.keyInput.placeholder = provider === "gemini" ? "Gemini API key" : "sk-ant-…";
     this.keyForm.hidden = false;
     this.keyForm.setAttribute("data-hit", "");
@@ -415,4 +420,9 @@ export class ChatUI {
   get characterName() {
     return this.name;
   }
+}
+
+/** Where the API key is kept: the OS's own password store. */
+function keyStore(): string {
+  return /Linux|X11/.test(navigator.userAgent) ? "your system keyring" : "Windows Credential Manager";
 }
