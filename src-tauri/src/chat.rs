@@ -32,6 +32,8 @@ pub const DEFAULT_EFFORT: &str = "low";
 pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3.5-flash-lite";
 
 pub const EMOTION_TAGS: &str = "[happy] [sad] [angry] [surprised] [shy] [thinking] [proud] [neutral]";
+/// Short emotes the character can do mid-reply (see src/gestures.ts).
+pub const GESTURE_TAGS: &str = "[laugh] [giggle] [yawn] [sigh] [blush] [gasp]";
 
 /// Who answers in plain chat mode.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -105,7 +107,9 @@ when the user clearly asks for detail.\n\
 - Start every reply with exactly one emotion tag, chosen from: {EMOTION_TAGS}. \
 You may put another tag before a later sentence when your mood changes. \
 Tags are stripped before the user sees the text and make your body move, so pick the one \
-that fits what you are about to say."
+that fits what you are about to say.\n\
+- When you laugh, giggle, yawn, sigh, blush or gasp, you can also put one of {GESTURE_TAGS} \
+right before that sentence, and your body does it. Use them now and then, not in every reply."
     )
 }
 

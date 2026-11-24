@@ -3,6 +3,7 @@
 // fits the chosen model file and forwards every call to it.
 import type { Avatar } from "./avatar";
 import type { DanceMotion } from "./dance";
+import type { Gesture } from "./gestures";
 import type { MmdAvatar } from "./mmd";
 import type { Emotion, MotionSummary } from "./motions";
 import type { ModelActions } from "./poses";
@@ -13,6 +14,8 @@ export interface Character {
   readonly loaded: boolean;
   actions: ModelActions;
   emote(emotion: Emotion): boolean;
+  /** A short emote (laugh, yawn…); a model without them shows the nearest emotion. */
+  gesture(g: Gesture): boolean;
   headTop(): number | null;
   /** (x, y) in device pixels from the window's top-left. */
   hitTest(x: number, y: number): boolean;
@@ -107,6 +110,9 @@ export class Stage implements Character {
 
   emote(emotion: Emotion) {
     return this.active?.emote(emotion) ?? false;
+  }
+  gesture(g: Gesture) {
+    return this.active?.gesture(g) ?? false;
   }
   headTop() {
     return this.active?.headTop() ?? null;

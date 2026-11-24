@@ -206,8 +206,19 @@ Pick a `.pmx` (or older `.pmd`) file instead of a `.model3.json` and the app dra
 - **Hair and clothes** swing with the model's own physics (Bullet, compiled to WebAssembly).
 - She turns her head and eyes towards the cursor, and click-through works the same as for Live2D.
 - **Dancing**: ask her to dance in chat and she does. See [Dancing](#dancing-mmd-models) below.
+- **Laughing, yawning and other emotes**: she can laugh, giggle, yawn, sigh, blush and gasp. See [Emotes](#emotes-mmd-models) below.
 
 Check each model's readme for its terms; many MMD models allow personal use only.
+
+### Emotes (MMD models)
+
+MMD characters have six short built-in emotes, made from their bones and face morphs: **laugh**, **giggle**, **yawn**, **sigh**, **blush** and **gasp**. Each lasts a few seconds and plays on top of whatever she is doing, then she carries on.
+
+- **From her replies**: Claude can put `[laugh]`, `[giggle]`, `[yawn]`, `[sigh]`, `[blush]` or `[gasp]` before a sentence. Without a tag, the first cue in what she says works too: "haha", "lol", "hehe", "*sighs*", "*yawns*", "*blushes*", "gasp!". One emote per reply.
+- **When you ask**: "can you yawn?", "laugh for me", "do a little sigh". Talking about it ("I laughed so hard", "don't laugh") does nothing. Your message still goes to Claude.
+- **Your own motions win**: put a `.vmd` named after the emote in the model's folder (`laugh.vmd`, `giggle.vmd`, `yawn.vmd`, `sigh.vmd`, `blush.vmd`, `gasp.vmd`, or the Japanese `笑い`, `くすくす`, `あくび`, `ため息`, `照れ`, `びっくり`) and her body plays it instead. The face still comes from the built-in emote.
+- **Trying them**: every emote is listed under Animations in the poses picker.
+- Not while she dances. Live2D models show the nearest emotion instead (laugh and giggle look happy, a sigh looks sad, and so on).
 
 ### Dancing (MMD models)
 

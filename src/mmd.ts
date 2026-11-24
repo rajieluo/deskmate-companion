@@ -42,6 +42,7 @@ import { MmdBulletPhysics } from "babylon-mmd/esm/Runtime/Optimized/Physics/mmdB
 
 import type { Character } from "./character";
 import { builtinDancePose, type DanceMotion } from "./dance";
+import { GESTURES, gesturePose, type FaceRole, type Gesture } from "./gestures";
 import { BONES, blinkWeight, envelope, faceRig, findBone, sortVmds, type FaceRig, type VmdFile, type VmdSet } from "./mmd-face";
 import type { Emotion, MotionSummary } from "./motions";
 import type { ModelActions } from "./poses";
@@ -50,7 +51,10 @@ const EMOTE_MS = 3200;
 const FPS = 30;
 const VMD_GROUP = "vmd";
 const BUILTIN_GROUP = "builtin";
+const GESTURE_GROUP = "gesture";
 const MORPH_PREFIX = "morph:";
+/** A gesture asked for sooner than this after the last one is skipped. */
+const GESTURE_GAP_MS = 1500;
 
 /** Lowered-arm angle (radians) for models standing in the T-pose. */
 const ARMS_DOWN = 0.62;
@@ -76,10 +80,10 @@ export class MmdAvatar implements Character {
   private loadId = 0;
   private disposed = false;
 
-  private rig: FaceRig = { blink: null, mouth: null, emotions: {} };
+  private rig: FaceRig = { blink: null, mouth: null, emotions: {}, roles: {} };
   private morphNames: string[] = [];
   private bones = new Map<string, IMmdRuntimeLinkedBone>();
-  private vmds: VmdSet = { idle: null, emotions: {}, all: [] };
+  private vmds: VmdSet = { idle: null, emotions: {}, gestures: {}, all: [] };
   private handles = new Map<string, MmdRuntimeAnimationHandle>();
   private playing: Playing | null = null;
   /** When the built-in dance started, while it plays. */
@@ -104,6 +108,9 @@ export class MmdAvatar implements Character {
   private mouthSource: (() => number) | null = null;
   private mouthWasOpen = false;
   private emotion: { morphs: [string, number][]; start: number } | null = null;
+  /** The built-in gesture playing, or one played from a .vmd (face still built in). */
+  private gestureNow: { g: Gesture; start: number; motion: boolean } | null = null;
+  private lastGesture = -Infinity;
   private nextBlink = performance.now() + 2000;
   private blinkStart = -1;
   private touched = new Set<string>();
@@ -225,11 +232,14 @@ export class MmdAvatar implements Character {
     this.touched.clear();
     this.toggled.clear();
     this.emotion = null;
+    this.gestureNow = null;
     this.actions = {
       expressions: this.morphNames.map((name) => ({ label: name, file: MORPH_PREFIX + name })),
       motions: [
         { label: "Built-in idle", group: BUILTIN_GROUP, index: 0, face: false },
         ...this.vmds.all.map((v, index) => ({ label: v.label, group: VMD_GROUP, index, face: false })),
+        // Each gesture once, built in or from its .vmd.
+        ...GESTURES.map((g, index) => ({ label: `${g[0].toUpperCase()}${g.slice(1)}${this.vmds.gestures[g] ? "" : " (built-in)"}`, group: GESTURE_GROUP, index, face: false })),
       ],
     };
 
@@ -457,6 +467,15 @@ export class MmdAvatar implements Character {
 
   /** Loops the picked motion (or the built-in idle) from now on, also next time. */
   playMotion(group: string, index: number) {
+    if (group === GESTURE_GROUP) {
+      // Picked by hand: play it even if one just played.
+      if (GESTURES[index]) {
+        this.lastGesture = -Infinity;
+        this.gestureNow = null;
+        this.gesture(GESTURES[index]);
+      }
+      return;
+    }
     this.endDance();
     if (group === BUILTIN_GROUP) this.pickedIdle = null;
     else if (group === VMD_GROUP && this.vmds.all[index]) this.pickedIdle = this.vmds.all[index];
@@ -476,6 +495,30 @@ export class MmdAvatar implements Character {
     if (morphs) this.emotion = { morphs, start: performance.now() };
     // An emotion's motion would cut the dance short; the face still shows it.
     if (vmd && !this.dancing) void this.play(vmd, false).catch((e) => console.warn("[mmd] emotion motion failed", e));
+    return true;
+  }
+
+  /**
+   * A short emote: the model folder's .vmd for it if there is one, else the
+   * built-in one from bones and face morphs. Not while dancing.
+   */
+  gesture(g: Gesture): boolean {
+    if (!this.mmd || this.dancing) return false;
+    const now = performance.now();
+    // One at a time: a reply tagged [yawn] right after "can you yawn?" doesn't yawn twice.
+    if (this.gestureNow || now - this.lastGesture < GESTURE_GAP_MS) return true;
+    this.lastGesture = now;
+    const vmd = this.vmds.gestures[g];
+    // The face comes from the built-in gesture either way; a motion brings its own body.
+    this.gestureNow = { g, start: now, motion: !!vmd };
+    this.emotion = null;
+    if (vmd) {
+      void this.play(vmd, false).catch((e) => {
+        console.warn("[mmd] gesture motion failed", e);
+        // Fall back to the built-in body movement.
+        if (this.gestureNow?.g === g) this.gestureNow.motion = false;
+      });
+    }
     return true;
   }
 
@@ -518,7 +561,19 @@ export class MmdAvatar implements Character {
     const mmd = this.mmd;
     if (!mmd) return;
     const now = performance.now();
-    const controlled = [BONES.upperBody, BONES.lowerBody, BONES.neck, BONES.head, BONES.eyes, BONES.leftArm, BONES.rightArm, BONES.leftElbow, BONES.rightElbow]
+    const controlled = [
+      BONES.upperBody,
+      BONES.lowerBody,
+      BONES.neck,
+      BONES.head,
+      BONES.eyes,
+      BONES.leftArm,
+      BONES.rightArm,
+      BONES.leftElbow,
+      BONES.rightElbow,
+      BONES.leftShoulder,
+      BONES.rightShoulder,
+    ]
       .map((names) => findBone(this.bones, names))
       .filter((b): b is IMmdRuntimeLinkedBone => b !== null);
     const identity = Quaternion.Identity();
@@ -578,6 +633,35 @@ export class MmdAvatar implements Character {
       rotate(BONES.upperBody, Math.sin(t * 1.6) * 0.02, Math.sin(t * 0.37) * 0.03, Math.sin(t * 0.23) * 0.025);
     }
 
+    // 2c. A gesture (laugh, yawn…) on top of the idle or motion.
+    let gesture = this.gestureNow && !this.dancing ? gesturePose(this.gestureNow.g, now - this.gestureNow.start) : null;
+    if (this.gestureNow && (!gesture || this.dancing)) {
+      if (!this.dancing && !this.playing && this.gestureNow.motion === false) this.resetCenter();
+      this.gestureNow = null;
+      gesture = null;
+    }
+    if (gesture && !this.gestureNow!.motion) {
+      rotate(BONES.upperBody, ...gesture.upperBody);
+      rotate(BONES.neck, ...gesture.neck);
+      rotate(BONES.head, ...gesture.head);
+      rotate(BONES.leftShoulder, 0, 0, gesture.shoulders);
+      rotate(BONES.rightShoulder, 0, 0, -gesture.shoulders);
+      rotate(BONES.leftArm, 0, 0, gesture.arms);
+      rotate(BONES.rightArm, 0, 0, -gesture.arms);
+      rotate(BONES.leftElbow, 0, -gesture.elbows, 0);
+      rotate(BONES.rightElbow, 0, gesture.elbows, 0);
+      if (!this.playing) {
+        // A motion moves the センター bone itself; only dip her when none plays.
+        const center = findBone(this.bones, BONES.center);
+        if (center) {
+          const rest = new Vector3();
+          center.getRestMatrix().getTranslationToRef(rest);
+          rest.y -= gesture.dip;
+          center.position = rest;
+        }
+      }
+    }
+
     // 3. Looking at the cursor, eased; not while dancing, the dance moves her head.
     const k = 0.12;
     this.look.x += (this.lookTarget.x - this.look.x) * k;
@@ -602,13 +686,15 @@ export class MmdAvatar implements Character {
       weights.set(name, Math.min(1, Math.max(weights.get(name) ?? 0, w)));
     };
     for (const name of this.toggled) add(name, 1);
-    if (this.emotion) {
+    if (gesture) {
+      for (const [role, w] of Object.entries(gesture.face) as [FaceRole, number][]) add(this.rig.roles[role] ?? null, w);
+    } else if (this.emotion) {
       const e = envelope(now - this.emotion.start, EMOTE_MS);
       if (e <= 0 && now - this.emotion.start > EMOTE_MS) this.emotion = null;
       else for (const [name, w] of this.emotion.morphs) add(name, w * e);
     }
     if (now >= this.nextBlink && this.blinkStart < 0) this.blinkStart = now;
-    if (this.blinkStart >= 0) {
+    if (this.blinkStart >= 0 && !gesture?.face.eyesClosed) {
       const w = blinkWeight(now - this.blinkStart);
       if (w <= 0 && now - this.blinkStart > 0) {
         this.blinkStart = -1;
@@ -636,6 +722,7 @@ export class MmdAvatar implements Character {
       `emotions ${Object.keys(this.rig.emotions).join(",")}`,
       `vmd ${this.vmds.all.length} (idle ${this.vmds.idle?.label ?? "built-in"})`,
       `dancing ${this.dancing}`,
+      `gestures ${GESTURES.map((g) => (this.vmds.gestures[g] ? `${g}=vmd` : g)).join(",")}`,
       `height ${(this.maxY - this.minY).toFixed(1)}`,
     ];
     return Promise.resolve(parts.join("; "));

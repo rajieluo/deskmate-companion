@@ -1,5 +1,6 @@
 // Pulls emotion tags like "[happy]" out of streamed text.
 // Text arrives in arbitrary chunks, so a tag may be split across two of them.
+import { gestureTag, type Gesture } from "./gestures";
 import { EMOTIONS, type Emotion } from "./motions";
 
 export type Mood = Emotion | "neutral";
@@ -8,7 +9,6 @@ const MOODS = new Set<string>([...EMOTIONS, "neutral"]);
 const ALIASES: Record<string, Mood> = {
   excited: "happy",
   joyful: "happy",
-  laugh: "happy",
   smile: "happy",
   cheerful: "happy",
   upset: "sad",
@@ -28,6 +28,8 @@ const MAX_TAG = 16;
 export interface Parsed {
   text: string;
   moods: Mood[];
+  /** Gesture tags such as [laugh] or [yawn], in order. */
+  gestures: Gesture[];
 }
 
 export class TagStream {
@@ -50,13 +52,19 @@ export class TagStream {
   end(): Parsed {
     const rest = this.pending;
     this.pending = "";
-    return { text: rest, moods: [] };
+    return { text: rest, moods: [], gestures: [] };
   }
 
   private parse(input: string): Parsed {
     const moods: Mood[] = [];
+    const gestures: Gesture[] = [];
     let text = input.replace(/\[([a-zA-Z ]{2,14})\]\s?/g, (whole, word: string) => {
       const key = word.trim().toLowerCase();
+      const gesture = gestureTag(key);
+      if (gesture) {
+        gestures.push(gesture);
+        return "";
+      }
       const mood = MOODS.has(key) ? (key as Mood) : ALIASES[key];
       if (!mood) return whole;
       moods.push(mood);
@@ -66,6 +74,6 @@ export class TagStream {
       text = text.replace(/^\s+/, "");
       if (text) this.atStart = false;
     }
-    return { text, moods };
+    return { text, moods, gestures };
   }
 }

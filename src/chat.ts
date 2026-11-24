@@ -8,6 +8,7 @@ import { Mic } from "./mic";
 import type { Voice } from "./voice";
 import { SlashMenu } from "./slash";
 import { danceIntent, pickDance } from "./dance";
+import { gestureCue, gestureIntent, type Gesture } from "./gestures";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -73,6 +74,7 @@ export class ChatUI {
       this.slash.hide();
       if (text && !this.appCommand(text)) {
         void this.maybeDance(text);
+        this.maybeGesture(text);
         void this.send(text);
       }
     });
@@ -172,6 +174,7 @@ export class ChatUI {
       const text = (await host.transcribe(recording.samples)).trim();
       if (text) {
         void this.maybeDance(text);
+        this.maybeGesture(text);
         await this.send(text);
       } else this.say("Sorry, I didn't catch that.", 3000);
     } catch (err) {
@@ -188,6 +191,30 @@ export class ChatUI {
    * Claude Code as typed, which runs it (skills, custom commands, /compact, /context…).
    */
   private lastDance: string | null = null;
+
+  /** "Can you yawn?" makes her yawn right away; the message still goes to Claude. */
+  private maybeGesture(text: string) {
+    const g = gestureIntent(text);
+    if (g) this.gesture(g);
+  }
+
+  /** A gesture tag or cue already moved her this reply, so later cues don't pile up. */
+  private gestured = false;
+
+  private gesture(g: Gesture) {
+    this.gestured = true;
+    this.avatar.gesture(g);
+  }
+
+  /** Tags like [laugh] play right away; otherwise the first cue ("haha", "*sigh*") in a spoken line. */
+  private gestureFrom(tagged: readonly Gesture[], sentences: readonly string[]) {
+    for (const g of tagged) this.gesture(g);
+    if (this.gestured) return;
+    for (const line of sentences) {
+      const g = gestureCue(line);
+      if (g) return this.gesture(g);
+    }
+  }
 
   /** "Dance!" makes an MMD character dance right away; the message still goes to Claude. */
   private async maybeDance(text: string) {
@@ -250,6 +277,8 @@ export class ChatUI {
     const last = tags.end();
     for (const mood of [...first.moods, ...last.moods]) if (mood !== "neutral") this.avatar.emote(mood);
     const plain = (first.text + last.text).trim();
+    this.gestured = false;
+    this.gestureFrom(first.gestures, [plain]);
     if (!plain) return;
     host.historyAppend("assistant", plain);
     this.bubble.classList.remove("thinking");
@@ -291,6 +320,7 @@ export class ChatUI {
     host.historyAppend("user", historyText);
     this.tags = new TagStream();
     this.sentences = new SentenceBuffer();
+    this.gestured = false;
     this.voice.stop();
     this.say("…");
     this.setBubbleText("");
@@ -309,12 +339,14 @@ export class ChatUI {
   }
 
   private onDelta(chunk: string) {
-    const { text, moods } = this.tags.feed(chunk);
+    const { text, moods, gestures } = this.tags.feed(chunk);
     for (const mood of moods) if (mood !== "neutral") this.avatar.emote(mood);
+    const lines = text ? this.sentences.push(text) : [];
+    this.gestureFrom(gestures, lines);
     if (text) {
       this.bubble.classList.remove("thinking");
       this.append(text);
-      for (const s of this.sentences.push(text)) this.voice.say(speakable(s));
+      for (const s of lines) this.voice.say(speakable(s));
     }
   }
 
@@ -333,7 +365,9 @@ export class ChatUI {
     this.activity.hidden = true;
     const rest = this.tags.end().text;
     this.append(rest);
-    for (const s of [...this.sentences.push(rest), ...this.sentences.flush()]) this.voice.say(speakable(s));
+    const lines = [...this.sentences.push(rest), ...this.sentences.flush()];
+    this.gestureFrom([], lines);
+    for (const s of lines) this.voice.say(speakable(s));
     this.bubble.classList.remove("thinking");
     host.historyAppend("assistant", this.bubbleRaw);
     const words = this.bubbleRaw.split(/\s+/).length;
