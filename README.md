@@ -19,7 +19,7 @@ See **[INSTALL.md](INSTALL.md)** for the requirements of each mode (which items 
 
 | Mode | What it needs |
 |---|---|
-| Plain chat | The app, a Live2D model, and an Anthropic API key with prepaid credits (the free Claude plan has no API access) |
+| Plain chat | The app, a Live2D model, and either an Anthropic API key with prepaid credits (the free Claude plan has no API access) or a free Google Gemini API key ([setup](#free-voice-chat-with-google-gemini)) |
 | Claude Code mode | Claude Code, signed in with a paid Claude plan or an API key |
 | Crew mode (firstmate) | Claude Code plus the firstmate setup: Git for Windows (Git Bash), Node.js and npm, Herdr, a GitHub login (`gh`) and a few more tools |
 | Voice output | Nothing extra: Kokoro runs locally for free. Kyutai Pocket TTS (cloned voices) is optional and needs Python |
@@ -35,7 +35,7 @@ INSTALL.md also covers [loading your own Live2D models, choosing or adding voice
 - **Drag** the character to move her. The position and size are remembered.
 - **Click** her (or press **Ctrl+Shift+Space** anywhere) to open the chat box. Type and press Enter; Esc closes it.
 - The first time you chat she asks for an [Anthropic API key](https://console.anthropic.com/settings/keys). It is stored in Windows Credential Manager, never in a file. `ANTHROPIC_API_KEY` in the environment also works. *Set API key…* in the tray changes it. An Anthropic key needs prepaid API credits; a free Claude plan can't be used by other apps.
-- **Free option: Google Gemini.** Pick *Google Gemini (free tier)* in the tray's **Chat model** submenu (or set `"chat_provider": "gemini"`). She then asks for a Gemini API key, which you can get free at [Google AI Studio](https://aistudio.google.com/apikey): sign in with a Google account, accept the terms, and copy the key it creates. It is stored in Windows Credential Manager too (`GEMINI_API_KEY` in the environment also works), and *Set API key…* changes the key of whichever provider is picked. The free tier has per-minute and daily limits that Google sets per model (see your current ones at [aistudio.google.com/rate-limit](https://aistudio.google.com/rate-limit)); when one is used up she says so, and the daily limit resets at midnight Pacific time. Google may use free-tier chats to improve its products. Gemini only answers in plain chat mode; Claude Code mode and crew mode still need Claude. Switching provider starts a fresh conversation.
+- **Free option: Google Gemini.** She can chat (typed or out loud) on Gemini's free tier instead of Claude. See [Free voice chat with Google Gemini](#free-voice-chat-with-google-gemini) below.
 - *Forget conversation* in the tray starts a fresh conversation.
 - **Talk to her out loud**: press the microphone button in the chat box, or **Ctrl+Alt+M** from anywhere. Speak, and she stops listening after a short pause. Your words are transcribed locally with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) and sent as a message. The first time, the Whisper model (`base.en`, about 140 MB) downloads into `%APPDATA%\com.rajieluo.desktopassistant\whisper\`. Windows may ask for microphone permission once.
 - She **speaks her replies** with [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), running locally, and her mouth follows the audio. The voice model (about 90 MB) downloads from Hugging Face the first time and is cached after that. It runs on the CPU by default (see `voice_device` below).
@@ -43,6 +43,58 @@ INSTALL.md also covers [loading your own Live2D models, choosing or adding voice
 - **Chat history**: the clock button in the chat box, or *Chat history…* in the tray, opens a window with every message, grouped by day and searchable. Messages are saved to `%APPDATA%\com.rajieluo.desktopassistant\history.jsonl`; *Clear…* in that window deletes them.
 - **Ctrl + mouse wheel** over her makes the window bigger or smaller.
 - **Keys 1 to 7** (after clicking her) play happy, sad, angry, surprised, shy, thinking and proud, so you can check a model's motions.
+
+## Free voice chat with Google Gemini
+
+If you don't have prepaid Anthropic credits, plain chat can use Google Gemini's free tier instead. Only the "brain" changes: your voice is still transcribed locally by Whisper, and her replies are still spoken locally by Kokoro or Pocket TTS, so voice chat works the same way and costs nothing.
+
+### 1. Get a free Gemini API key
+
+1. Go to [Google AI Studio's API keys page](https://aistudio.google.com/apikey) and sign in with a Google account.
+2. Accept the terms if it asks (first visit only).
+3. Click **Create API key**. If it asks for a Google Cloud project, let it create one for you.
+4. Copy the key. It's a long string that usually starts with `AIza`. Treat it like a password: don't paste it into chats, screenshots or files you share.
+
+No credit card is needed for the free tier.
+
+### 2. Switch her to Gemini
+
+Right-click her (or the tray icon), open **Chat model**, and pick **Google Gemini (free tier)**. This starts a fresh conversation.
+
+Also make sure **Claude Code mode** and **Crew mode (firstmate)** are unticked in the same menu. Gemini only answers in plain chat mode; those two modes always use Claude.
+
+If you prefer editing settings by hand, close the app and set `"chat_provider": "gemini"` in `settings.json` (see [Chat settings](#chat-settings)). `"chat_provider": "anthropic"` switches back to Claude.
+
+### 3. Enter the key
+
+Click her to open the chat box and send any message. Because no Gemini key is saved yet, she asks: *"I need a Google Gemini API key to talk…"* and shows a key box. Paste the key there and press Enter.
+
+- The key is saved in **Windows Credential Manager** (under `desktop-assistant`, as `gemini-api-key`), never in a file. It is kept separately from the Anthropic key, so you can switch between Claude and Gemini without re-entering either.
+- To change it later, pick Gemini in **Chat model** first, then use **Set API key…** in the menu. That button always sets the key of the provider that is currently picked.
+- Alternatively, set a `GEMINI_API_KEY` environment variable (for example `setx GEMINI_API_KEY "your-key-here"` in a terminal, then restart the app). If it is set, it takes priority over the saved key.
+
+### 4. Check it works
+
+1. Type "hi" in the chat box. A reply should stream into her speech bubble after a moment, and she should say it out loud.
+2. Press the microphone button (or **Ctrl+Alt+M**), say something, and wait for the short pause. Your words appear as a message and she answers out loud. That's voice chat on Gemini.
+3. **Chat history…** in the menu shows the exchange, if you want to double-check.
+
+If something is off, her bubble tells you what went wrong:
+
+| What she says | What it means |
+|---|---|
+| "That API key didn't work." and the key box again | The key was mistyped, deleted or restricted. Copy it again from [AI Studio](https://aistudio.google.com/apikey), or create a new one, and paste it. If you set `GEMINI_API_KEY`, check that too, since it wins over the saved key. |
+| "Too many messages for Gemini's free tier in one minute…" | You hit the per-minute limit. Wait a minute. |
+| "Gemini's free daily limit has been reached…" | You hit the daily limit. It resets at midnight Pacific time. You can see your current limits at [aistudio.google.com/rate-limit](https://aistudio.google.com/rate-limit). |
+| "Gemini API error 404: …" | The `gemini_model` in `settings.json` doesn't exist (or no longer does). Remove the line to go back to the default. |
+| A Claude-sounding reply, or a Claude Code status like "Reading main.ts…" | Claude Code mode or Crew mode is still on. Untick it. |
+
+### Good to know
+
+- The default model is `gemini-3.5-flash-lite`, which is fast and covered by the free tier. You can pick another free one, such as `gemini-3.6-flash` or `gemini-3.8-flash` (smarter but slower), with `gemini_model` in `settings.json`. [Google's pricing page](https://ai.google.dev/gemini-api/docs/pricing) lists which models are free.
+- `chat_effort` also applies to Gemini 3 and later models (it sets their thinking level).
+- Google may use free-tier conversations to improve its products. Use a Claude key, or a paid Gemini plan, for anything private.
+- To go back to Claude, pick one of the Claude models in **Chat model**.
 
 ## Claude Code mode
 
