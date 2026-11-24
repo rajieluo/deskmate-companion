@@ -150,7 +150,10 @@ export class MmdAvatar implements Character {
     return this.mmd !== null;
   }
 
-  async load(url: string, files: string[] = []): Promise<MotionSummary> {
+  /** Remembers the motion picked in the picker for the model `key` (its path). */
+  private idleKey = "";
+
+  async load(url: string, files: string[] = [], key = url): Promise<MotionSummary> {
     const id = ++this.loadId;
     if (!this.runtime) {
       // Single-threaded Bullet: no SharedArrayBuffer or worker setup needed.
@@ -189,7 +192,8 @@ export class MmdAvatar implements Character {
     this.vmds = sortVmds(files);
     this.handles.clear();
     this.playing = null;
-    this.pickedIdle = undefined;
+    this.idleKey = `mmd-idle:${key}`;
+    this.pickedIdle = loadPickedIdle(this.idleKey, this.vmds);
     this.touched.clear();
     this.toggled.clear();
     this.emotion = null;
@@ -337,10 +341,16 @@ export class MmdAvatar implements Character {
     return this.play(idle, true).catch((e) => console.warn("[mmd] idle motion failed", e));
   }
 
+  /** Loops the picked motion (or the built-in idle) from now on, also next time. */
   playMotion(group: string, index: number) {
     if (group === BUILTIN_GROUP) this.pickedIdle = null;
     else if (group === VMD_GROUP && this.vmds.all[index]) this.pickedIdle = this.vmds.all[index];
     else return;
+    try {
+      localStorage.setItem(this.idleKey, this.pickedIdle ? this.pickedIdle.file : "");
+    } catch {
+      /* storage unavailable: just don't remember */
+    }
     void this.startIdle();
   }
 
@@ -498,4 +508,17 @@ function restHeight(meshes: Mesh[]): [number, number] {
     }
   }
   return min <= max ? [min, max] : [0, 20];
+}
+
+/** The idle picked last time: a motion, null (built-in idle) or undefined (none picked). */
+function loadPickedIdle(key: string, vmds: VmdSet): VmdFile | null | undefined {
+  let saved: string | null = null;
+  try {
+    saved = localStorage.getItem(key);
+  } catch {
+    return undefined;
+  }
+  if (saved === null) return undefined;
+  if (saved === "") return null;
+  return vmds.all.find((v) => v.file === saved);
 }

@@ -60,6 +60,12 @@ describe("sortVmds", () => {
     expect(set.emotions.happy?.file).toBe("happy.vmd");
   });
 
+  it("starts an idle pack with its plain standing motion", () => {
+    const set = sortVmds(["pack/ot0510_待機_カッコつけ.vmd", "pack/ot0510_待機_素立ち.vmd", "pack/ot0510_Aスタンス.vmd"]);
+    expect(set.idle?.label).toBe("ot0510 待機 素立ち");
+    expect(set.all).toHaveLength(3);
+  });
+
   it("has no idle when nothing looks like one", () => {
     expect(sortVmds(["Dance.vmd"]).idle).toBeNull();
   });

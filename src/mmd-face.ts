@@ -110,6 +110,9 @@ export interface VmdSet {
   all: VmdFile[];
 }
 
+/** Names of a plain standing idle: 素立ち "just standing", 通常 "normal". */
+const PLAIN_IDLE = /素立ち|通常|basic|default|normal|plain/i;
+
 const byLabel = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 /** Sorts a model folder's .vmd files into an idle loop, emotions and the rest. */
@@ -121,13 +124,15 @@ export function sortVmds(files: readonly string[]): VmdSet {
       return { file, label: base.replace(/\.vmd$/i, "").replace(/_/g, " ") };
     })
     .sort((a, b) => byLabel.compare(a.label, b.label));
-  let idle: VmdFile | null = null;
+  const idles: VmdFile[] = [];
   const emotions: VmdSet["emotions"] = {};
   for (const v of all) {
     const kind = classifyMotion(v.file.replace(/\.vmd$/i, ""));
-    if (kind.kind === "idle") idle ??= v;
+    if (kind.kind === "idle") idles.push(v);
     else if (kind.kind === "emotion") emotions[kind.emotion] ??= v;
   }
+  // Idle packs come in styles (cool, cute, hands on hips…); start with the plain one.
+  const idle = idles.find((v) => PLAIN_IDLE.test(v.label)) ?? idles[0] ?? null;
   return { idle, emotions, all };
 }
 

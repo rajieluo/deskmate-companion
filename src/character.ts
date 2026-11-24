@@ -91,7 +91,7 @@ export class Stage implements Character {
       // Show the canvas before loading so it has its real size for framing.
       this.show("mmd");
       this.live2d.unload();
-      return this.mmd.load(source.url, files);
+      return this.mmd.load(source.url, files, source.label);
     }
     this.show("live2d");
     this.mmd?.dispose();
