@@ -34,6 +34,15 @@ export class SentenceBuffer {
   }
 }
 
+// "hehe", "hehehe"... as a whole word: Kokoro reads these as one short "heh".
+const LAUGH = /(?<![\p{L}\p{N}'])(?:he){2,}(?![\p{L}\p{N}'])/giu;
+
+/** Spells a laugh the way it should sound: "Hehe" -> "Hee hee". */
+function laugh(word: string): string {
+  const out = Array(word.length / 2).fill("hee").join(" ");
+  return word[0] === "H" ? "H" + out.slice(1) : out;
+}
+
 /** Removes things that sound bad read aloud (URLs, code, emoji, markdown symbols). */
 export function speakable(text: string): string {
   return text
@@ -43,6 +52,7 @@ export function speakable(text: string): string {
     .replace(/https?:\/\/\S+/g, "a link")
     .replace(/[*_#>~]+/g, "")
     .replace(/\p{Extended_Pictographic}/gu, "")
+    .replace(LAUGH, laugh)
     .replace(/\s+/g, " ")
     .trim();
 }

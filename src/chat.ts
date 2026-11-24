@@ -48,7 +48,7 @@ export class ChatUI {
       error: (turn, kind, message) => this.accept(turn) && this.onError(kind, message),
     });
     host.onEvent("open-chat", () => this.open());
-    host.onEvent("open-api-key", () => this.askForKey());
+    host.onEvent("open-api-key", () => void this.askForKey());
     host.onEvent("chat-reset", () => this.say("(I've forgotten our conversation.)", 4000));
     host.onEvent("start-listening", () => void this.listen());
     host.onSttProgress((p) => this.say(`Downloading the speech model (first time only)… ${Math.floor(p)}%`));
@@ -92,7 +92,11 @@ export class ChatUI {
     refreshName();
     // The name comes from the model's folder, so a new model can mean a new name.
     host.onModelChanged(() => refreshName());
-    host.onModelPicked((model) => this.say(`Chat model: ${model}`, 3000));
+    host.onModelPicked(async (model) => {
+      const s = await host.chatStatus();
+      if (s.brain === "api" && !s.has_key) void this.askForKey(undefined, s.provider);
+      else this.say(`Chat model: ${model}`, 3000);
+    });
     host.onBrainChanged((brain) => {
       this.setMode(brain);
       this.say(
@@ -251,7 +255,7 @@ export class ChatUI {
   async send(text: string, historyText = text) {
     const status = await host.chatStatus();
     if (status.brain === "api" && !status.has_key) {
-      this.askForKey();
+      void this.askForKey(undefined, status.provider);
       return;
     }
     host.historyAppend("user", historyText);
@@ -321,7 +325,7 @@ export class ChatUI {
       return;
     }
     if (kind === "no_key" || kind === "auth") {
-      this.askForKey(kind === "auth" ? "That API key didn't work." : undefined);
+      void this.askForKey(kind === "auth" ? "That API key didn't work." : undefined);
       return;
     }
     if (kind === "refusal") this.avatar.emote("shy");
@@ -330,10 +334,14 @@ export class ChatUI {
     console.warn("[chat]", kind, message);
   }
 
-  private askForKey(reason?: string) {
-    this.say(
-      `${reason ? reason + " " : ""}I need an Anthropic API key to talk. Paste one below (it's stored in Windows Credential Manager).`,
-    );
+  private async askForKey(reason?: string, provider?: host.ChatStatus["provider"]) {
+    provider ??= (await host.chatStatus()).provider;
+    const need =
+      provider === "gemini"
+        ? "I need a Google Gemini API key to talk. Get a free one at https://aistudio.google.com/apikey and paste it below"
+        : "I need an Anthropic API key to talk. Paste one below";
+    this.say(`${reason ? reason + " " : ""}${need} (it's stored in Windows Credential Manager).`);
+    this.keyInput.placeholder = provider === "gemini" ? "Gemini API key" : "sk-ant-…";
     this.keyForm.hidden = false;
     this.keyForm.setAttribute("data-hit", "");
     this.keyInput.focus();

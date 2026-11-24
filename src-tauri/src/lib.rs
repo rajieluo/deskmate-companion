@@ -7,7 +7,7 @@
 //!   ignores mouse events, so the page can turn click-through on and off by
 //!   hit-testing the character's pixels,
 //! * the tray menu (choose model, reset position, quit),
-//! * the Claude chat (see `chat.rs`), so the API key never reaches the page.
+//! * the Claude or Gemini chat (see `chat.rs`), so the API key never reaches the page.
 
 mod chat;
 mod claude_code;
@@ -15,6 +15,7 @@ mod sessions;
 mod crew;
 mod firstmate;
 mod model;
+mod pocket;
 mod history;
 mod stt;
 mod tts;
@@ -108,7 +109,35 @@ const MODEL_CHOICES: &[(&str, &str, &str)] = &[
     ("model:claude-opus-5-5", "claude-opus-5-5", "Claude Opus 5.5 (smartest)"),
     ("model:claude-sonnet-5-5", "claude-sonnet-5-5", "Claude Sonnet 5.5"),
     ("model:claude-haiku-5-5", "claude-haiku-5-5", "Claude Haiku 5.5 (fastest, cheapest)"),
+    // Switches the provider rather than the Claude model; `gemini_model` picks the model.
+    (GEMINI_CHOICE, "gemini", "Google Gemini (free tier)"),
 ];
+const GEMINI_CHOICE: &str = "model:gemini";
+
+/// Who answers in plain chat mode, from the settings.
+fn chat_provider(s: &model::Settings) -> chat::Provider {
+    chat::Provider::from_setting(s.chat_provider.as_deref())
+}
+
+/// The model plain chat mode uses with the current provider.
+fn chat_model(s: &model::Settings) -> String {
+    match chat_provider(s) {
+        chat::Provider::Anthropic => s.chat_model.clone().unwrap_or_else(|| chat::DEFAULT_MODEL.into()),
+        chat::Provider::Gemini => s
+            .gemini_model
+            .clone()
+            .filter(|m| !m.trim().is_empty())
+            .unwrap_or_else(|| chat::DEFAULT_GEMINI_MODEL.into()),
+    }
+}
+
+/// The Chat model submenu entry that matches the settings (the model id, or "gemini").
+fn chat_choice(s: &model::Settings) -> String {
+    match chat_provider(s) {
+        chat::Provider::Gemini => "gemini".into(),
+        chat::Provider::Anthropic => chat_model(s),
+    }
+}
 
 /// The Model submenu's items, kept so the check mark can move when one is picked.
 struct ModelMenu<R: Runtime>(Vec<CheckMenuItem<R>>);
@@ -151,8 +180,47 @@ struct VoiceItem<R: Runtime>(CheckMenuItem<R>);
 /// The tray's "Voice" submenu: "the model's own voice" item, then (id, item) per voice.
 struct VoiceMenu<R: Runtime>(CheckMenuItem<R>, Vec<(String, CheckMenuItem<R>)>);
 
+/// The tray's "Engine: Kokoro" and "Engine: Pocket TTS" items under Voice.
+struct EngineMenu<R: Runtime> {
+    kokoro: CheckMenuItem<R>,
+    pocket: CheckMenuItem<R>,
+}
+
+/// The voice engine setting: "kokoro" (default) or "pocket".
+fn voice_engine(store: &ModelStore) -> String {
+    match store.settings().voice_engine.as_deref() {
+        Some("pocket") => "pocket".into(),
+        _ => "kokoro".into(),
+    }
+}
+
+/// Ticks the engine in the tray and tells the page which one to use. Pocket TTS
+/// is only used for models that have a cloned voice (or a pocket_voice preset).
+fn sync_engine<R: Runtime>(app: &AppHandle<R>, sample: bool) {
+    let store = app.state::<Arc<ModelStore>>();
+    let engine = voice_engine(&store);
+    let pocket_voice = store.pocket_voice();
+    if let Some(menu) = app.try_state::<EngineMenu<R>>() {
+        let _ = menu.kokoro.set_checked(engine == "kokoro");
+        let _ = menu.pocket.set_checked(engine == "pocket");
+    }
+    log::info!(
+        "voice engine {engine}{}",
+        match (engine.as_str(), &pocket_voice) {
+            ("pocket", Some(v)) => format!(", Pocket voice {v}"),
+            ("pocket", None) => ", but this model has no cloned voice (voice.safetensors, voice.wav or pocket_voice), so Kokoro".into(),
+            _ => String::new(),
+        }
+    );
+    let _ = app.emit(
+        "voice-engine",
+        serde_json::json!({ "engine": engine, "pocket_voice": pocket_voice.is_some(), "sample": sample }),
+    );
+}
+
 /// Ticks the current model's voice in the tray and tells the page to use it.
 fn sync_voice<R: Runtime>(app: &AppHandle<R>, sample: bool) {
+    sync_engine(app, false);
     let (voice, picked) = app.state::<Arc<ModelStore>>().voice();
     if let Some(menu) = app.try_state::<VoiceMenu<R>>() {
         let _ = menu.0.set_checked(!picked);
@@ -185,7 +253,10 @@ fn get_model(store: State<'_, Arc<ModelStore>>) -> Option<ModelInfo> {
 
 #[derive(Serialize)]
 struct ChatStatus {
+    /// Whether the current chat provider has a key.
     has_key: bool,
+    /// Plain chat mode's provider: "anthropic" or "gemini".
+    provider: &'static str,
     /// Hotkey labels ("" when unset or unavailable).
     hotkeys: Hotkeys,
     name: String,
@@ -197,6 +268,10 @@ struct ChatStatus {
     voice_speed: f32,
     voice_pitch: f32,
     voice_device: String,
+    /// "kokoro" or "pocket".
+    voice_engine: String,
+    /// Whether the current model has a voice for Pocket TTS.
+    pocket_voice: bool,
     /// "api", "claude_code" or "crew"
     brain: String,
     claude_code_folder: Option<String>,
@@ -295,10 +370,11 @@ fn page_log(level: String, message: String) {
 fn chat_status(store: State<'_, Arc<ModelStore>>, hotkeys: State<'_, Hotkeys>) -> ChatStatus {
     let s = store.settings();
     ChatStatus {
-        has_key: chat::get_api_key().is_some(),
+        has_key: chat::get_api_key(chat_provider(&s)).is_some(),
+        provider: chat_provider(&s).id(),
         hotkeys: hotkeys.inner().clone(),
         name: store.character_name(),
-        model: s.chat_model.unwrap_or_else(|| chat::DEFAULT_MODEL.into()),
+        model: chat_model(&s),
         voice_enabled: s.voice_enabled.unwrap_or(true),
         follow_mouse: s.follow_mouse.unwrap_or(true),
         fade_bottom: s.fade_bottom.unwrap_or(true),
@@ -306,15 +382,18 @@ fn chat_status(store: State<'_, Arc<ModelStore>>, hotkeys: State<'_, Hotkeys>) -
         voice_speed: s.voice_speed.unwrap_or(1.0).clamp(0.5, 2.0),
         voice_pitch: s.voice_pitch.unwrap_or(1.0).clamp(0.75, 1.35),
         voice_device: s.voice_device.unwrap_or_else(|| "cpu".into()),
+        voice_engine: voice_engine(&store),
+        pocket_voice: store.pocket_voice().is_some(),
         brain: s.brain.unwrap_or_else(|| "api".into()),
         claude_code_folder: s.claude_code_folder.map(|p| p.display().to_string()),
         toolbar_position: s.toolbar_position.unwrap_or_else(|| "middle".into()),
     }
 }
 
+/// Saves the key for the current chat provider.
 #[tauri::command]
-fn set_api_key(key: String) -> Result<(), String> {
-    chat::set_api_key(&key)
+fn set_api_key(store: State<'_, Arc<ModelStore>>, key: String) -> Result<(), String> {
+    chat::set_api_key(chat_provider(&store.settings()), &key)
 }
 
 #[tauri::command]
@@ -379,7 +458,8 @@ async fn chat_send<R: Runtime>(
         return Ok(turn);
     }
     let config = ChatConfig {
-        model: s.chat_model.unwrap_or_else(|| chat::DEFAULT_MODEL.into()),
+        provider: chat_provider(&s),
+        model: chat_model(&s),
         effort: s.chat_effort.unwrap_or_else(|| chat::DEFAULT_EFFORT.into()),
         // A persona file for this model wins; then the global `persona` setting; then the built-in one.
         persona: match character {
@@ -602,6 +682,69 @@ async fn tts_synthesize(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// Where the Pocket TTS sidecar comes from (see pocket.rs).
+fn pocket_config<R: Runtime>(app: &AppHandle<R>) -> Result<pocket::Config, String> {
+    let s = app.state::<Arc<ModelStore>>().settings();
+    let data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let python = s
+        .pocket_python
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| data.join("pocket").join("venv").join("Scripts").join("python.exe"));
+    let resources = app.path().resource_dir().map_err(|e| e.to_string())?;
+    Ok(pocket::Config {
+        python,
+        script: pocket::script_path(&resources),
+        cache_dir: data.join("voice").join("pocket"),
+        quantize: s.pocket_quantize.unwrap_or(true),
+    })
+}
+
+fn current_pocket_voice<R: Runtime>(app: &AppHandle<R>) -> Result<String, String> {
+    app.state::<Arc<ModelStore>>()
+        .pocket_voice()
+        .ok_or_else(|| "this model has no cloned voice for Pocket TTS".to_string())
+}
+
+/// Starts Pocket TTS and loads the current model's voice. Returns the sample rate.
+#[tauri::command]
+async fn pocket_prepare<R: Runtime>(app: AppHandle<R>, pocket: State<'_, Arc<pocket::Pocket>>) -> Result<u32, String> {
+    let config = pocket_config(&app)?;
+    let voice = current_pocket_voice(&app)?;
+    pocket.prepare(&config, &voice).await.inspect_err(|e| log::error!("pocket voice: {e}"))?;
+    Ok(pocket.rate.load(std::sync::atomic::Ordering::SeqCst))
+}
+
+/// Speaks one sentence with Pocket TTS. Audio arrives on `on_chunk` as raw 16-bit
+/// PCM while it's generated; returns timing stats when the sentence is done.
+#[tauri::command]
+async fn pocket_speak<R: Runtime>(
+    app: AppHandle<R>,
+    pocket: State<'_, Arc<pocket::Pocket>>,
+    text: String,
+    on_chunk: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>,
+) -> Result<serde_json::Value, String> {
+    let config = pocket_config(&app)?;
+    let voice = current_pocket_voice(&app)?;
+    let pocket = pocket.inner().clone();
+    let result = pocket
+        .speak(&config, &voice, &text, |pcm| {
+            let _ = on_chunk.send(tauri::ipc::InvokeResponseBody::Raw(pcm));
+        })
+        .await
+        .inspect_err(|e| log::warn!("pocket voice: {e}"));
+    // An empty message marks the end, since this command's reply can reach the
+    // page before the last chunks do.
+    let _ = on_chunk.send(tauri::ipc::InvokeResponseBody::Raw(Vec::new()));
+    result
+}
+
+/// Drops the sentences Pocket TTS is still working on (she was interrupted).
+#[tauri::command]
+async fn pocket_cancel(pocket: State<'_, Arc<pocket::Pocket>>) -> Result<(), String> {
+    pocket.cancel().await;
+    Ok(())
+}
+
 #[tauri::command]
 async fn stt_prepare<R: Runtime>(app: AppHandle<R>, stt: State<'_, Arc<Stt>>) -> Result<(), String> {
     stt::check_cpu()?;
@@ -782,11 +925,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let crew_window = MenuItem::with_id(app, "crew_window", "Crew sessions…", true, None::<&str>)?;
     app.manage(BrainMenu { code: code.clone(), crew: crew.clone() });
     let sep3 = PredefinedMenuItem::separator(app)?;
-    let current_model = app
-        .state::<Arc<ModelStore>>()
-        .settings()
-        .chat_model
-        .unwrap_or_else(|| chat::DEFAULT_MODEL.into());
+    let current_model = chat_choice(&app.state::<Arc<ModelStore>>().settings());
     let mut model_items = Vec::new();
     for (id, model, label) in MODEL_CHOICES {
         model_items.push(CheckMenuItem::with_id(app, *id, *label, true, current_model == *model, None::<&str>)?);
@@ -809,8 +948,15 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         let refs: Vec<&dyn tauri::menu::IsMenuItem<R>> = items.iter().map(|i| i as &dyn tauri::menu::IsMenuItem<R>).collect();
         group_menus.push(Submenu::with_items(app, *group, true, &refs)?);
     }
+    let engine = voice_engine(&app.state::<Arc<ModelStore>>());
+    let engine_kokoro = CheckMenuItem::with_id(app, "engine:kokoro", "Engine: Kokoro", true, engine == "kokoro", None::<&str>)?;
+    let engine_pocket =
+        CheckMenuItem::with_id(app, "engine:pocket", "Engine: Pocket TTS (cloned voice)", true, engine == "pocket", None::<&str>)?;
+    app.manage(EngineMenu { kokoro: engine_kokoro.clone(), pocket: engine_pocket.clone() });
+    let engine_sep = PredefinedMenuItem::separator(app)?;
     let voice_sep = PredefinedMenuItem::separator(app)?;
-    let mut voice_refs: Vec<&dyn tauri::menu::IsMenuItem<R>> = vec![&own_voice, &voice_sep];
+    let mut voice_refs: Vec<&dyn tauri::menu::IsMenuItem<R>> =
+        vec![&engine_kokoro, &engine_pocket, &engine_sep, &own_voice, &voice_sep];
     voice_refs.extend(group_menus.iter().map(|m| m as &dyn tauri::menu::IsMenuItem<R>));
     let voice_menu = Submenu::with_items(app, "Voice", true, &voice_refs)?;
     app.manage(VoiceMenu(own_voice.clone(), voice_items));
@@ -921,6 +1067,11 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 }
             }
             "quit" => app.exit(0),
+            "engine:kokoro" | "engine:pocket" => {
+                let engine = event.id.as_ref().trim_start_matches("engine:").to_string();
+                app.state::<Arc<ModelStore>>().update(|s| s.voice_engine = Some(engine));
+                sync_engine(app, true);
+            }
             "voice:default" => {
                 app.state::<Arc<ModelStore>>().pick_voice(None);
                 sync_voice(app, true);
@@ -938,8 +1089,17 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 }
             }
             id if id.starts_with("model:") => {
-                let model = id.trim_start_matches("model:").to_string();
-                app.state::<Arc<ModelStore>>().update(|s| s.chat_model = Some(model.clone()));
+                let store = app.state::<Arc<ModelStore>>();
+                if id == GEMINI_CHOICE {
+                    store.update(|s| s.chat_provider = Some("gemini".into()));
+                } else {
+                    let model = id.trim_start_matches("model:").to_string();
+                    store.update(|s| {
+                        s.chat_provider = Some("anthropic".into());
+                        s.chat_model = Some(model);
+                    });
+                }
+                let model = chat_model(&store.settings());
                 if let Some(menu) = app.try_state::<ModelMenu<R>>() {
                     for (item, (item_id, _, _)) in menu.0.iter().zip(MODEL_CHOICES) {
                         let _ = item.set_checked(*item_id == id);
@@ -1043,6 +1203,7 @@ pub fn run() {
                 }
             }
             app.manage(Arc::new(tts::Tts::default()));
+            app.manage(Arc::new(pocket::Pocket::default()));
             app.manage(Arc::new(History::new(app.path().app_data_dir()?)));
 
             build_tray(app.handle())?;
@@ -1108,6 +1269,9 @@ pub fn run() {
             stt_prepare,
             tts_prepare,
             tts_synthesize,
+            pocket_prepare,
+            pocket_speak,
+            pocket_cancel,
             pick_claude_code_folder,
             crew_tasks,
             crew_fleet,
@@ -1126,8 +1290,15 @@ pub fn run() {
             set_toolbar_position,
             show_menu
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Desktop Assistant");
+        .build(tauri::generate_context!())
+        .expect("error while building Desktop Assistant")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                if let Some(pocket) = app.try_state::<Arc<pocket::Pocket>>() {
+                    pocket.kill();
+                }
+            }
+        });
 }
 
 #[cfg(test)]

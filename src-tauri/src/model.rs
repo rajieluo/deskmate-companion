@@ -22,8 +22,13 @@ pub struct Settings {
     pub model_path: Option<PathBuf>,
     /// What the character calls itself. Default: taken from the model's folder name.
     pub character_name: Option<String>,
+    /// Who answers in plain chat mode: "anthropic" (Claude) or "gemini" (Google
+    /// Gemini, which has a free tier). Default: anthropic.
+    pub chat_provider: Option<String>,
     /// Claude model id. Default: claude-opus-5-5.
     pub chat_model: Option<String>,
+    /// Gemini model id, used when `chat_provider` is "gemini". Default: gemini-3.5-flash-lite.
+    pub gemini_model: Option<String>,
     /// low | medium | high | xhigh | max. Default: low (fast, cheap replies).
     pub chat_effort: Option<String>,
     /// Replaces the whole built-in persona prompt when set.
@@ -42,6 +47,14 @@ pub struct Settings {
     /// Voice model variant for the native voice: q8 (default, ~90 MB), q8f16,
     /// fp16 or fp32 (~325 MB). Whichever runs fastest on this CPU.
     pub voice_model: Option<String>,
+    /// Voice engine: "kokoro" (default) or "pocket" (Kyutai Pocket TTS with a cloned
+    /// voice; used only for models that have one, see voices::pocket_voice).
+    pub voice_engine: Option<String>,
+    /// Python that has `pocket-tts` installed (e.g. a venv's Scripts\python.exe).
+    /// Default: pocket/venv/Scripts/python.exe in the app's data folder, if there is one.
+    pub pocket_python: Option<PathBuf>,
+    /// Run Pocket TTS with int8 quantization (faster on the CPU). Default: true.
+    pub pocket_quantize: Option<bool>,
     /// Whisper model for voice input: tiny.en, base.en (default), small.en, medium.en, or multilingual ones.
     pub stt_model: Option<String>,
     /// "api" (default): chat through the Claude API with an API key.
@@ -229,6 +242,11 @@ impl ModelStore {
             }
             None => s.voice = voice.map(str::to_string),
         });
+    }
+
+    /// The current model's voice for Pocket TTS (a preset name or file path), if it has one.
+    pub fn pocket_voice(&self) -> Option<String> {
+        self.current_dir().and_then(|d| crate::voices::pocket_voice(&d))
     }
 
     /// The folder holding the current model file.

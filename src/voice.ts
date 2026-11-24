@@ -1,15 +1,150 @@
-import { inTauri, log, onTtsProgress, ttsPrepare, ttsSynthesize } from "./host";
+import { inTauri, log, onTtsProgress, pocketCancel, pocketPrepare, pocketSpeak, ttsPrepare, ttsSynthesize } from "./host";
 
 // Speaks reply text sentence by sentence and exposes a mouth-open level for lip sync.
 //
 // Every sentence is sent for synthesis as soon as it arrives, and each clip is
 // scheduled to start the moment the previous one ends, so there are no gaps
-// as long as synthesis keeps ahead of playback.
+// as long as synthesis keeps ahead of playback. Engines that stream (Pocket
+// TTS) hand over each sentence in short chunks, and playback starts on the first.
+
+export interface Clip {
+  audio: Float32Array;
+  rate: number;
+}
 
 export interface SpeechEngine {
   /** Starts loading the model early (optional). */
   warmUp?(): void;
-  synthesize(text: string): Promise<{ audio: Float32Array; rate: number }>;
+  synthesize(text: string): Promise<Clip>;
+  /** Makes one sentence in pieces, calling `onChunk` for each as soon as it's ready (optional). */
+  stream?(text: string, onChunk: (clip: Clip) => void): Promise<void>;
+  /** Drops sentences still being made, because speech was stopped (optional). */
+  cancel?(): void;
+}
+
+/** One queued sentence: its audio arrives whole or in chunks, and playback takes them in order. */
+export class SpeechJob {
+  private chunks: Clip[] = [];
+  private finished = false;
+  private waiter: (() => void) | null = null;
+
+  constructor(public readonly streamed = false) {}
+
+  push(clip: Clip) {
+    if (this.finished) return;
+    this.chunks.push(clip);
+    this.waiter?.();
+  }
+
+  /** No more audio is coming (done, failed or stopped). */
+  finish() {
+    this.finished = true;
+    this.waiter?.();
+  }
+
+  /** The next piece of audio, or null once the sentence is over. */
+  async next(): Promise<Clip | null> {
+    for (;;) {
+      if (this.chunks.length) return this.chunks.shift()!;
+      if (this.finished) return null;
+      await new Promise<void>((resolve) => (this.waiter = resolve));
+      this.waiter = null;
+    }
+  }
+}
+
+/** 16-bit PCM to the -1..1 floats Web Audio plays. */
+export function pcm16ToFloat(pcm: Int16Array): Float32Array {
+  const out = new Float32Array(pcm.length);
+  for (let i = 0; i < pcm.length; i++) out[i] = pcm[i] / 32768;
+  return out;
+}
+
+/**
+ * Kyutai Pocket TTS with the model's cloned voice, run by a Python sidecar in
+ * the desktop app (see src-tauri/src/pocket.rs). It streams: the first chunk of
+ * a sentence arrives ~0.1 s after it's sent. If it can't start or a sentence
+ * fails, that sentence and the rest of the session are spoken by `fallback`
+ * (Kokoro), so she never goes silent.
+ */
+export class PocketEngine implements SpeechEngine {
+  private ready: Promise<number> | null = null;
+  /** Set after a failure: everything goes to the fallback until the engine is picked again. */
+  broken = false;
+  private timed = 0;
+
+  constructor(public fallback: SpeechEngine) {}
+
+  /** Starts over after the model or engine changed (new voice, another try after a failure). */
+  reset() {
+    this.ready = null;
+    this.broken = false;
+    this.timed = 0;
+  }
+
+  private prepare() {
+    return (this.ready ??= pocketPrepare().catch((e) => {
+      this.ready = null;
+      throw e;
+    }));
+  }
+
+  private fail(e: unknown) {
+    if (!this.broken) log("warn", `[voice] Pocket TTS failed, using Kokoro for the rest of the session: ${e}`);
+    this.broken = true;
+  }
+
+  warmUp() {
+    this.fallback.warmUp?.();
+    const started = performance.now();
+    void this.prepare().then(
+      () => log("info", `[voice] Pocket TTS ready in ${((performance.now() - started) / 1000).toFixed(1)} s`),
+      (e) => this.fail(e),
+    );
+  }
+
+  async synthesize(text: string): Promise<Clip> {
+    const parts: Clip[] = [];
+    await this.stream(text, (c) => parts.push(c));
+    const rate = parts[0]?.rate ?? 24000;
+    const audio = new Float32Array(parts.reduce((n, c) => n + c.audio.length, 0));
+    let at = 0;
+    for (const c of parts) {
+      audio.set(c.audio, at);
+      at += c.audio.length;
+    }
+    return { audio, rate };
+  }
+
+  async stream(text: string, onChunk: (clip: Clip) => void): Promise<void> {
+    if (!this.broken) {
+      let got = 0;
+      try {
+        const rate = await this.prepare();
+        const started = performance.now();
+        let first = 0;
+        const stats = await pocketSpeak(text, (pcm) => {
+          if (!got++) first = performance.now() - started;
+          onChunk({ audio: pcm16ToFloat(pcm), rate });
+        });
+        if (this.timed++ < 3 && got) {
+          log("info", `[voice] Pocket: first audio after ${Math.round(first)} ms; ${stats.audio_s ?? "?"} s of speech took ${((stats.ms ?? 0) / 1000).toFixed(1)} s`);
+        }
+        return;
+      } catch (e) {
+        this.fail(e);
+        // Half a sentence already played: don't repeat it in another voice.
+        if (got) return;
+      }
+    }
+    if (this.fallback.stream) return this.fallback.stream(text, onChunk);
+    onChunk(await this.fallback.synthesize(text));
+  }
+
+  cancel() {
+    pocketCancel();
+    this.fallback.cancel?.();
+  }
 }
 
 /**
@@ -133,7 +268,9 @@ export class Voice {
   private ctx: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
   private samples = new Float32Array(1024);
-  private queue: Promise<{ audio: Float32Array; rate: number } | null>[] = [];
+  private queue: SpeechJob[] = [];
+  /** When the first sentence of what's being said now was queued, to log the time to first audio. */
+  private replyStart: number | null = null;
   private playing = false;
   private sources = new Set<AudioBufferSourceNode>();
   /** AudioContext time at which the last scheduled clip ends. */
@@ -164,10 +301,11 @@ export class Voice {
   say(text: string) {
     if (!this.enabled || !text) return;
     this.audio();
-    const job = this.engine.synthesize(text).catch((e) => {
-      console.warn("[voice]", e);
-      return null;
-    });
+    const engine = this.engine;
+    const job = new SpeechJob(!!engine.stream);
+    const made = engine.stream ? engine.stream(text, (c) => job.push(c)) : engine.synthesize(text).then((c) => job.push(c));
+    made.catch((e) => console.warn("[voice]", e)).finally(() => job.finish());
+    if (!this.playing && !this.queue.length) this.replyStart = performance.now();
     this.queue.push(job);
     this.wake?.();
     if (!this.playing) void this.drain(this.generation);
@@ -176,7 +314,10 @@ export class Voice {
   /** Stops speaking and drops anything queued. */
   stop() {
     this.generation++;
+    if (this.queue.length) this.engine.cancel?.();
+    for (const job of this.queue) job.finish();
     this.queue = [];
+    this.replyStart = null;
     for (const src of this.sources) {
       try {
         src.stop();
@@ -194,8 +335,11 @@ export class Voice {
     this.playing = true;
     while (gen === this.generation) {
       if (this.queue.length) {
-        const clip = await this.queue.shift()!;
-        if (clip && gen === this.generation) this.schedule(clip);
+        const job = this.queue[0];
+        const clip = await job.next();
+        if (gen !== this.generation) break;
+        if (clip) this.schedule(clip, job.streamed);
+        else this.queue.shift();
         continue;
       }
       if (!this.sources.size) break;
@@ -209,15 +353,24 @@ export class Voice {
     if (gen === this.generation) this.playing = false;
   }
 
-  /** Starts a clip right after the one before it (or now, if nothing is playing). */
-  private schedule({ audio, rate }: { audio: Float32Array; rate: number }) {
+  /**
+   * Starts a clip right after the one before it (or now, if nothing is playing).
+   * A streamed chunk that starts from silence gets a little more lead, so the
+   * next chunk has time to arrive before this one ends.
+   */
+  private schedule({ audio, rate }: Clip, streamed = false) {
+    if (!audio.length) return;
     const ctx = this.audio();
     const buffer = ctx.createBuffer(1, audio.length, rate);
     buffer.copyToChannel(audio as Float32Array<ArrayBuffer>, 0);
     const src = ctx.createBufferSource();
     src.buffer = buffer;
     src.connect(this.analyser!);
-    const start = Math.max(ctx.currentTime + 0.01, this.nextStart);
+    const start = Math.max(ctx.currentTime + (streamed ? 0.05 : 0.01), this.nextStart);
+    if (this.replyStart !== null) {
+      log("info", `[voice] first audio ${Math.round(performance.now() - this.replyStart)} ms after the first sentence was ready${streamed ? " (streamed)" : ""}`);
+      this.replyStart = null;
+    }
     this.nextStart = start + buffer.duration;
     this.sources.add(src);
     src.onended = () => this.sources.delete(src);

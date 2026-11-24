@@ -1,6 +1,6 @@
 # Desktop Assistant
 
-A Claude-powered Live2D or MMD character that lives on your Windows desktop.
+A Claude-powered (or, free, Gemini-powered) Live2D or MMD character that lives on your Windows desktop.
 
 It runs in a small transparent, always-on-top window. Clicks pass through to whatever is behind it except on the character itself, so it can sit on top of your other windows.
 
@@ -13,42 +13,19 @@ It runs in a small transparent, always-on-top window. Clicks pass through to wha
 | 3. Local Kokoro TTS with lip sync | done |
 | 4. Local whisper.cpp voice input | done |
 
-## Running it
+## Getting started
 
-You need [Node.js 22+](https://nodejs.org/), [Rust](https://rustup.rs/), the [Tauri prerequisites for Windows](https://v2.tauri.app/start/prerequisites/#windows) (WebView2 is already on Windows 10/11), and for building whisper.cpp, [CMake](https://cmake.org/download/) and [LLVM](https://github.com/llvm/llvm-project/releases) (`winget install Kitware.CMake LLVM.LLVM`).
+See **[INSTALL.md](INSTALL.md)** for the requirements of each mode (which items are required and which are optional), step-by-step setup, building from source, and troubleshooting. In short:
 
-```powershell
-npm install          # also downloads the Live2D Cubism Core runtime
-npm run tauri dev    # run the app with hot reload
-npm run tauri build  # build an installer in src-tauri/target/release/bundle/nsis
-```
+| Mode | What it needs |
+|---|---|
+| Plain chat | The app, a Live2D model, and an Anthropic API key with prepaid credits (the free Claude plan has no API access) |
+| Claude Code mode | Claude Code, signed in with a paid Claude plan or an API key |
+| Crew mode (firstmate) | Claude Code plus the firstmate setup: Git for Windows (Git Bash), Node.js and npm, Herdr, a GitHub login (`gh`) and a few more tools |
+| Voice output | Nothing extra: Kokoro runs locally for free. Kyutai Pocket TTS (cloned voices) is optional and needs Python |
+| Voice input | A CPU with AVX2 (most PCs from 2015 on) and a microphone |
 
-Every pull request also builds a Windows installer in CI; download it from the run's **Artifacts** section.
-
-### Building locally on Windows
-
-CI takes 20+ minutes; a local build is much faster (about 1 minute for the first Rust build on a recent PC, seconds after that).
-
-1. **Rust** (MSVC toolchain): `winget install Rustlang.Rustup`, then open a new terminal and run `rustup default stable-x86_64-pc-windows-msvc`.
-2. **C++ build tools**: Visual Studio 2022 or its Build Tools with the *Desktop development with C++* workload (MSVC and a Windows SDK). `winget install Microsoft.VisualStudio.2022.BuildTools`, then add the workload in the Visual Studio Installer.
-3. **A recent CMake** for whisper.cpp. Visual Studio ships one; if an older standalone CMake comes first on `PATH`, either `winget install Kitware.CMake`, or put the bundled one first for the session:
-   ```powershell
-   $env:Path = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin;$env:Path"
-   ```
-4. **libclang** (whisper-rs generates its bindings with it). Either `winget install LLVM.LLVM` (needs admin), or, without admin, take the DLL from the `libclang` Python wheel and point `LIBCLANG_PATH` at it:
-   ```powershell
-   python -m pip install --target "$env:LOCALAPPDATA\libclang-py" libclang
-   $env:LIBCLANG_PATH = "$env:LOCALAPPDATA\libclang-py\clang\native"
-   ```
-   Don't set `WHISPER_DONT_GENERATE_BINDINGS`: the bundled bindings are generated for Linux and fail to compile on Windows.
-5. **Node.js 22+** and WebView2 (already on Windows 10/11).
-
-Then `npm install` and `npm run tauri dev`. Close the installed Desktop Assistant first, or the two fight over the global hotkeys.
-
-Debugging tips:
-
-- Set `$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"` before `npm run tauri dev` to attach Edge DevTools (or a script) to the app's pages at `http://127.0.0.1:9222`.
-- If Vite is already running on port 1420, `cargo run` in `src-tauri/` starts just the app against it.
+INSTALL.md also covers [loading your own Live2D models, choosing or adding voices, and creating custom personas](INSTALL.md#6-your-own-models-voices-and-personas).
 
 ## Using it
 
@@ -57,7 +34,8 @@ Debugging tips:
 - **Right-click** her to open the same options menu as the tray icon.
 - **Drag** the character to move her. The position and size are remembered.
 - **Click** her (or press **Ctrl+Shift+Space** anywhere) to open the chat box. Type and press Enter; Esc closes it.
-- The first time you chat she asks for an [Anthropic API key](https://console.anthropic.com/settings/keys). It is stored in Windows Credential Manager, never in a file. `ANTHROPIC_API_KEY` in the environment also works. *Set API key…* in the tray changes it.
+- The first time you chat she asks for an [Anthropic API key](https://console.anthropic.com/settings/keys). It is stored in Windows Credential Manager, never in a file. `ANTHROPIC_API_KEY` in the environment also works. *Set API key…* in the tray changes it. An Anthropic key needs prepaid API credits; a free Claude plan can't be used by other apps.
+- **Free option: Google Gemini.** Pick *Google Gemini (free tier)* in the tray's **Chat model** submenu (or set `"chat_provider": "gemini"`). She then asks for a Gemini API key, which you can get free at [Google AI Studio](https://aistudio.google.com/apikey): sign in with a Google account, accept the terms, and copy the key it creates. It is stored in Windows Credential Manager too (`GEMINI_API_KEY` in the environment also works), and *Set API key…* changes the key of whichever provider is picked. The free tier has per-minute and daily limits that Google sets per model (see your current ones at [aistudio.google.com/rate-limit](https://aistudio.google.com/rate-limit)); when one is used up she says so, and the daily limit resets at midnight Pacific time. Google may use free-tier chats to improve its products. Gemini only answers in plain chat mode; Claude Code mode and crew mode still need Claude. Switching provider starts a fresh conversation.
 - *Forget conversation* in the tray starts a fresh conversation.
 - **Talk to her out loud**: press the microphone button in the chat box, or **Ctrl+Alt+M** from anywhere. Speak, and she stops listening after a short pause. Your words are transcribed locally with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) and sent as a message. The first time, the Whisper model (`base.en`, about 140 MB) downloads into `%APPDATA%\com.rajieluo.desktopassistant\whisper\`. Windows may ask for microphone permission once.
 - She **speaks her replies** with [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), running locally, and her mouth follows the audio. The voice model (about 90 MB) downloads from Hugging Face the first time and is cached after that. It runs on the CPU by default (see `voice_device` below).
@@ -70,7 +48,7 @@ Debugging tips:
 
 Instead of plain chat, she can be a voice and face for [Claude Code](https://claude.com/claude-code) working in a folder of yours (a code project, notes, anything).
 
-1. Install Claude Code and run `claude` once in a terminal to sign in. This mode uses that login (your Claude subscription), not an API key.
+1. Install Claude Code and run `claude` once in a terminal to sign in, with a paid Claude plan or an API key. This mode uses Claude Code's own login, not the key you gave the app.
 2. In the tray, pick **Claude Code folder…** and choose the folder. That switches on **Claude Code mode** (toggle it in the tray to go back to normal chat).
 3. Talk or type as usual: "what does this project do?", "add a test for the parser", "fix the failing build".
 
@@ -80,7 +58,7 @@ Permissions: there is no one to click "Allow" in this mode, so it runs with `acc
 
 ## Crew mode (firstmate)
 
-Crew mode makes her the face of [firstmate](https://github.com/kunchenguid/firstmate), which runs several Claude Code sessions in parallel, each in its own git worktree. You talk to her; she passes it to firstmate's first mate, reads out its answers, and shows a badge for each task (blue working, amber needs you, green PR ready, red failed). *Crew sessions…* in the tray opens a window listing every crewmate with its status and timeline. Firstmate runs in WSL2. Setup and details: [docs/crew-setup.md](docs/crew-setup.md).
+Crew mode makes her the face of [firstmate](https://github.com/kunchenguid/firstmate), which runs several Claude Code sessions in parallel, each in its own git worktree. You talk to her; she passes it to firstmate's first mate, reads out its answers, and shows a badge for each task (blue working, amber needs you, green PR ready, red failed). *Crew sessions…* in the tray opens a window listing every crewmate with its status and timeline. Firstmate runs natively under Git Bash by default, or in WSL2. Setup: [INSTALL.md](INSTALL.md#4-crew-mode-firstmate); details: [docs/crew-setup.md](docs/crew-setup.md).
 
 ### Announcements from the first mate
 
@@ -100,7 +78,9 @@ Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistan
 {
   "model_path": "C:\\Users\\you\\Documents\\live2d models\\1014100aqua\\1014100.model3.json",
   "character_name": null,
+  "chat_provider": "anthropic",
   "chat_model": "claude-opus-5-5",
+  "gemini_model": "gemini-3.5-flash-lite",
   "chat_effort": "low",
   "persona": null,
   "voice_enabled": true,
@@ -116,11 +96,16 @@ Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistan
 ```
 
 - `character_name`: what she calls herself. Leave it `null` to use the model's folder name, tidied up: `Nicole` stays Nicole, `1014100aqua` becomes Aqua, `mori_suit` becomes Mori Suit.
+- `chat_provider`: who answers in plain chat mode, `"anthropic"` (default, Claude) or `"gemini"` (Google Gemini, which has a free tier). The tray's **Chat model** submenu sets it too.
 - `chat_model`: any Claude model id. The tray's **Chat model** submenu switches between Opus 5.5, Sonnet 5.5 and Haiku 5.5 without editing the file. The default is Claude Opus 5.5. `claude-haiku-5-5` is much cheaper and faster if replies are good enough for you.
-- `chat_effort`: `low` (default, quick chatty replies), `medium`, `high`, `xhigh` or `max`.
+- `gemini_model`: the Gemini model id used when `chat_provider` is `"gemini"`. The default, `gemini-3.5-flash-lite`, is a stable model the free tier covers; `gemini-3.6-flash` and `gemini-3.8-flash` are also free but smarter and slower. [Google's pricing page](https://ai.google.dev/gemini-api/docs/pricing) lists which models are free.
+- `chat_effort`: `low` (default, quick chatty replies), `medium`, `high`, `xhigh` or `max`. With Gemini 3 and later models it sets the thinking level (`xhigh` and `max` both mean `XHIGH`); Gemini 2.x models ignore it.
 - `voice_enabled`, `voice`, `voice_speed`, `voice_pitch`: speech on or off, the Kokoro voice (`af_heart` by default; also `af_bella`, `af_nicole`, `af_sky`, `bf_emma` and [others](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md)), speed (0.5 to 2) and pitch (0.75 to 1.35). Speed and pitch also have sliders at the bottom of the poses panel; double-click a slider to reset it.
+- `voice_engine`: `"kokoro"` (default) or `"pocket"` for [Kyutai Pocket TTS](https://github.com/kyutai-labs/pocket-tts), which speaks in a voice cloned from a short recording and starts talking about 0.1 s after each sentence. The tray's **Voice** submenu switches between them. Pocket TTS is only used for models that have a cloned voice: `voice.safetensors` in the model folder (make it with `pocket-tts export-voice clip.wav voice.safetensors`), else `voice.wav` (10 to 30 s of clean speech; it is encoded once and cached), or `pocket_voice:` in `persona.md`'s front matter naming a file in the folder or a preset such as `alba`. Other models keep using Kokoro, and so does every sentence after Pocket TTS fails, so she never goes quiet. Speed and pitch apply to Kokoro only.
+- `pocket_python`, `pocket_quantize`: Pocket TTS runs in a Python sidecar ([setup](INSTALL.md#pocket-tts-cloned-voices)). Point `pocket_python` at the `python.exe` of a venv where you ran `pip install pocket-tts` (default: `pocket\venv\Scripts\python.exe` in the app's data folder). Voice cloning needs the gated weights: accept the terms at https://huggingface.co/kyutai/pocket-tts and run `hf auth login` once. `pocket_quantize` (default `true`) runs the model in int8, about 20% faster on the CPU.
 - `stt_model`, `stt_language`: the Whisper model for voice input (`tiny.en`, `base.en` by default, `small.en` for better accuracy, or multilingual `small` with `"stt_language": "auto"`) and the spoken language.
-- `voice_device`: where the voice runs, `"cpu"` (default) or `"gpu"`. The GPU is faster, but on some cards (an RX 7900 XT, for one) it garbles the speech; when that happens the app notices and switches back to the CPU by itself.
+- `voice_device`: where the voice runs, `"cpu"` (default) or `"gpu"` (DirectML, any DirectX 12 card). The GPU is faster, but on some cards (an RX 7900 XT, for one) it garbles the speech; set it back to `"cpu"` if that happens (see [Troubleshooting](INSTALL.md#troubleshooting)).
+- `voice_model`: the Kokoro model variant, `q8` (default, about 90 MB), `q8f16`, `fp16` or `fp32` (about 325 MB). Use whichever runs fastest on your CPU.
 - `model_params`: parameter values to hold on a model every frame, keyed by its folder name, e.g. `"model_params": { "Nicole": { "MouthJawOpen": 0 } }`. Lip sync still moves the mouth while she speaks. The log lists each model's mouth parameters and their values when it loads.
 - `fade_bottom`: softly fade out the bottom edge of the figure (default `true`), for models whose art stops at the legs. The tray has a **Fade bottom edge** checkbox for it.
 - `hotkeys`: the global hotkeys, e.g. `{ "talk": "Ctrl+Shift+Space", "listen": "Ctrl+Alt+M", "mute": "Ctrl+Alt+U" }` (those are the defaults). Use `""` to turn one off. If another app already uses a combination, the log says so and the tray shows no hotkey for it.
@@ -135,38 +120,19 @@ Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistan
 
 ### Per-model personas
 
-Each model can have its own personality. Put a plain text file in either place (the first one found wins):
-
-1. `%APPDATA%\com.rajieluo.desktopassistant\personas\<model folder name>.md`, e.g. `personas\Nicole.md`
-2. `persona.md` inside the model's own folder, e.g. `Documents\live2d models\Nicole\persona.md`
-
-`.txt` works too. Describe who the character is, how they talk and how they treat you. You don't need to repeat the reply rules: the app always adds the short-reply and emotion-tag instructions, and a reminder to stay genuinely helpful. In Claude Code mode the persona only shapes her tone and spoken summaries, not the quality of the work. The file is read on every message, so edits apply from the next reply. A `persona.md` in the model folder can also start with front matter that sets the model's default voice; it is stripped before the text reaches Claude:
-
-```
----
-voice: af_bella
----
-You are Nicole Demara, ...
-``` Persona files for characters you don't own stay on your machine; don't commit them here.
-
-Whenever a model is loaded (at startup or when you switch models), the app also writes that model's persona text, front matter stripped, to `%APPDATA%\com.rajieluo.desktopassistant\current-persona.md`, so other tools such as firstmate can take on the same character. When the loaded model has no persona file, `current-persona.md` is deleted: no file means no persona. This copy is refreshed only on a model load or switch, so edits to a persona file reach it the next time that model is loaded. Don't edit `current-persona.md` itself; it is overwritten.
+Each model can have its own personality in a persona file: `personas\<model folder name>.md` in the app's data folder, or `persona.md` in the model's own folder. Front matter in the model folder's `persona.md` can also set the model's voice (`voice:`, `pocket_voice:`). File locations, lookup order and format are in [INSTALL.md](INSTALL.md#custom-personas). Persona files for characters you don't own stay on your machine; don't commit them here.
 
 Claude starts each reply with an emotion tag such as `[happy]`. The app strips the tags from the text and plays the matching motion. The API call is made from the Rust side, so the key never reaches the web page. Server-side refusal fallbacks are turned on, so if Claude Opus 5.5 declines a message the API retries it on a fallback model in the same call.
 
 ## If something goes wrong
 
-The app writes a log to `%LOCALAPPDATA%\com.rajieluo.desktopassistant\logs\Desktop Assistant.log`.
-If it closes without a message, Windows also records the crash: open Event Viewer, go to
-Windows Logs > Application, and look for an "Application Error" for `desktop-assistant.exe`.
-The exception code there (for example `0xc000001d`, an illegal instruction) says what kind of crash it was.
-
-Speech input needs a CPU with AVX2 (most PCs from 2015 on).
+The app writes a log to `%LOCALAPPDATA%\com.rajieluo.desktopassistant\logs\Desktop Assistant.log`. Known problems and fixes are in [INSTALL.md](INSTALL.md#troubleshooting).
 
 ## Models
 
 Models are loaded from your own folder and are **never committed** to this repo (`.gitignore` blocks Live2D and MMD model files). The app only reads files inside the folder of the model you picked.
 
-Any Cubism 3/4 model (`.model3.json`) works. Many models put all their motions in one unnamed group, so the app sorts them by file name:
+Any Cubism 3/4 model (`.model3.json`) works; load one with **Choose model…** in the tray ([details](INSTALL.md#live2d-models)). Many models put all their motions in one unnamed group, so the app sorts them by file name:
 
 - `Wait`, `Idle`, `Stand`, `Breath`… become the idle loop.
 - `Happy`/`Smile`, `Sad`/`Cry`/`Upset`, `Anger`, `Surprise`, `Shame`/`Shy`, `Puzzle`/`Doubt`/`Serious`, `Pride` become emotions (including the pinyin names some models use, like `weixiao` or `shengqi`).
@@ -205,3 +171,4 @@ Tauri can only make a whole window ignore the mouse. So the Rust side polls the 
 - [Babylon.js](https://github.com/BabylonJS/Babylon.js) (Apache-2.0) and [babylon-mmd](https://github.com/noname0310/babylon-mmd) (MIT) render MMD models.
 - [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT) through [whisper-rs](https://github.com/tazz4843/whisper-rs) (Unlicense) does speech to text.
 - [kokoro-js](https://www.npmjs.com/package/kokoro-js) (Apache-2.0) and the Kokoro-82M model (Apache-2.0) do text to speech.
+- [Kyutai Pocket TTS](https://github.com/kyutai-labs/pocket-tts) is optional and not bundled: you install it yourself with pip, under its own license, and its weights are gated on Hugging Face.
