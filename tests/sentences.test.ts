@@ -32,4 +32,16 @@ describe("speakable", () => {
     expect(speakable("**Sure!** See https://x.com/a 😀 `npm i`")).toBe("Sure! See a link npm i");
     expect(speakable("Read [Stripe's docs](https://docs.stripe.com/connect) first.")).toBe("Read Stripe's docs first.");
   });
+
+  it("spells laughs so they are spoken as hee hee", () => {
+    expect(speakable("hehe that's funny")).toBe("hee hee that's funny");
+    expect(speakable("Hehe~ okay!")).toBe("Hee hee okay!");
+    expect(speakable("HEHE, sure.")).toBe("Hee hee, sure.");
+    expect(speakable("hehehe!")).toBe("hee hee hee!");
+    expect(speakable("Well... hehe.")).toBe("Well... hee hee.");
+  });
+
+  it("leaves words that only contain hehe alone", () => {
+    expect(speakable("thehe hehey heh haha")).toBe("thehe hehey heh haha");
+  });
 });
