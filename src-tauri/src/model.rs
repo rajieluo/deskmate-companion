@@ -106,6 +106,10 @@ pub struct Settings {
     pub crew_distro: Option<String>,
     /// Crew mode: the firstmate home inside WSL. Default: ~/firstmate.
     pub crew_home: Option<String>,
+    /// Keys this build doesn't know (written by a newer or differently built app),
+    /// kept as they are so saving doesn't drop them.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Clone, Serialize)]
@@ -515,6 +519,22 @@ pub fn name_from_folder(folder: &str) -> Option<String> {
         })
         .collect();
     (!words.is_empty()).then(|| words.join(" "))
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::Settings;
+
+    #[test]
+    fn keeps_unknown_keys_when_saving() {
+        let json = r#"{"voice_engine": "pocket", "some_future_setting": {"a": 1}, "another": "x"}"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(s.voice_engine.as_deref(), Some("pocket"));
+        let saved: serde_json::Value = serde_json::to_value(&s).unwrap();
+        assert_eq!(saved["some_future_setting"], serde_json::json!({"a": 1}));
+        assert_eq!(saved["another"], "x");
+        assert_eq!(saved["voice_engine"], "pocket");
+    }
 }
 
 #[cfg(test)]

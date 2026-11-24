@@ -686,10 +686,11 @@ async fn tts_synthesize(
 fn pocket_config<R: Runtime>(app: &AppHandle<R>) -> Result<pocket::Config, String> {
     let s = app.state::<Arc<ModelStore>>().settings();
     let data = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let python = s
-        .pocket_python
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or_else(|| data.join("pocket").join("venv").join("Scripts").join("python.exe"));
+    let pocket_dir = data.join("pocket");
+    let python = pocket::find_python(s.pocket_python.as_deref(), &pocket_dir);
+    if python.is_file() {
+        pocket::remember_python(&python, &pocket_dir);
+    }
     let resources = app.path().resource_dir().map_err(|e| e.to_string())?;
     Ok(pocket::Config {
         python,

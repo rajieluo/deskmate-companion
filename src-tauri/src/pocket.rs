@@ -35,6 +35,41 @@ const FIRST_CHUNK_TIMEOUT: Duration = Duration::from_secs(30);
 /// Longest gap between two chunks of one sentence.
 const CHUNK_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// File in the app's data folder that remembers the last Python that worked for
+/// Pocket TTS. It lives outside settings.json, so a build that doesn't know
+/// `pocket_python` (and drops it when it saves settings) can't lose it.
+pub const PYTHON_FILE: &str = "python.txt";
+
+/// The Python to run the sidecar with: `pocket_python` from settings if that file
+/// exists, else the one remembered in `pocket/python.txt`, else the default venv
+/// `pocket/venv/Scripts/python.exe` in the data folder. When none exists, returns
+/// the configured path (or the default) so the error names what was looked for.
+pub fn find_python(configured: Option<&Path>, pocket_dir: &Path) -> PathBuf {
+    let default = pocket_dir.join("venv").join("Scripts").join("python.exe");
+    let remembered = std::fs::read_to_string(pocket_dir.join(PYTHON_FILE))
+        .ok()
+        .map(|s| PathBuf::from(s.trim_start_matches('\u{feff}').trim()))
+        .filter(|p| !p.as_os_str().is_empty());
+    let configured = configured.filter(|p| !p.as_os_str().is_empty()).map(Path::to_path_buf);
+    [configured.clone(), remembered, Some(default.clone())]
+        .into_iter()
+        .flatten()
+        .find(|p| p.is_file())
+        .unwrap_or_else(|| configured.unwrap_or(default))
+}
+
+/// Remembers `python` in `pocket/python.txt` (see `find_python`). Best effort.
+pub fn remember_python(python: &Path, pocket_dir: &Path) {
+    let file = pocket_dir.join(PYTHON_FILE);
+    let text = python.display().to_string();
+    if std::fs::read_to_string(&file).ok().as_deref().map(str::trim) == Some(text.as_str()) {
+        return;
+    }
+    if let Err(e) = std::fs::create_dir_all(pocket_dir).and_then(|_| std::fs::write(&file, &text)) {
+        log::warn!("pocket voice: couldn't write {}: {e}", file.display());
+    }
+}
+
 /// Where the sidecar comes from.
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -323,6 +358,39 @@ pub fn script_path(resource_dir: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_python_from_settings_then_remembered_then_default() {
+        let root = std::env::temp_dir().join(format!("pocket-python-test-{}", std::process::id()));
+        let pocket_dir = root.join("pocket");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&pocket_dir).unwrap();
+        let default = pocket_dir.join("venv").join("Scripts").join("python.exe");
+        let configured = root.join("bench").join("python.exe");
+
+        // Nothing exists: name the configured path, else the default.
+        assert_eq!(find_python(Some(&configured), &pocket_dir), configured);
+        assert_eq!(find_python(None, &pocket_dir), default);
+        assert_eq!(find_python(Some(Path::new("")), &pocket_dir), default);
+
+        // A working configured Python is used and can be remembered.
+        std::fs::create_dir_all(configured.parent().unwrap()).unwrap();
+        std::fs::write(&configured, b"").unwrap();
+        assert_eq!(find_python(Some(&configured), &pocket_dir), configured);
+        remember_python(&configured, &pocket_dir);
+
+        // Settings lost pocket_python (an older build saved over it): the remembered one wins.
+        assert_eq!(find_python(None, &pocket_dir), configured);
+        // A configured path that no longer exists falls back to the remembered one too.
+        assert_eq!(find_python(Some(&root.join("gone.exe")), &pocket_dir), configured);
+
+        // Without a remembered one, the default venv is found.
+        std::fs::remove_file(pocket_dir.join(PYTHON_FILE)).unwrap();
+        std::fs::create_dir_all(default.parent().unwrap()).unwrap();
+        std::fs::write(&default, b"").unwrap();
+        assert_eq!(find_python(None, &pocket_dir), default);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn parses_sidecar_lines() {
