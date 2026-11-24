@@ -49,7 +49,8 @@
       "../node_modules/onnxruntime-desktop/bin/napi-v6/win32/x64/onnxruntime.dll": "onnxruntime.dll",
       "../node_modules/onnxruntime-desktop/bin/napi-v6/win32/x64/DirectML.dll": "DirectML.dll",
       "../node_modules/onnxruntime-desktop/bin/napi-v6/win32/x64/dxcompiler.dll": "dxcompiler.dll",
-      "resources/pocket_server.py": "pocket_server.py"
+      "resources/pocket_server.py": "pocket_server.py",
+      "resources/setup-pocket.ps1": "setup-pocket.ps1"
     }
   }
 }

@@ -11,9 +11,6 @@ use percent_encoding::percent_decode_str;
 use serde::{Deserialize, Serialize};
 use tauri::http::{header, Response, StatusCode};
 
-/// Default model on the developer's machine: Aqua, under Documents\live2d models.
-const DEFAULT_MODEL: &[&str] = &["live2d models", "1014100aqua", "1014100.model3.json"];
-
 /// Everything saved in `settings.json` in the app's config folder.
 /// Unknown or missing fields fall back to defaults, so the file can be hand-edited.
 #[derive(Default, Clone, Serialize, Deserialize)]
@@ -138,17 +135,15 @@ pub struct ModelStore {
 }
 
 impl ModelStore {
-    pub fn load(config_dir: PathBuf, documents: Option<PathBuf>) -> Self {
+    pub fn load(config_dir: PathBuf) -> Self {
         let settings_file = config_dir.join("settings.json");
         let saved: Settings = fs::read_to_string(&settings_file)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
         let mut settings = saved;
-        settings.model_path = settings.model_path.filter(|p| p.is_file()).or_else(|| {
-            let default = DEFAULT_MODEL.iter().fold(documents?, |p, part| p.join(part));
-            default.is_file().then_some(default)
-        });
+        // No model yet (first run) or it was moved: the page asks for one.
+        settings.model_path = settings.model_path.filter(|p| p.is_file());
         Self { settings_file, inner: Mutex::new(Inner { settings, generation: 1 }) }
     }
 

@@ -260,7 +260,7 @@ impl FirstMate {
         let config = CrewConfig::from_settings(&store);
         app.state::<Arc<crew::Crew>>().inner().clone().ensure_checked(app, &config).await?;
         let s = store.settings();
-        let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+        let dir = crate::data_dir(app)?;
         let prompt_file = dir.join("first-mate-prompt.md");
         let persona = store.model_persona().or_else(|| s.persona.clone().filter(|p| !p.trim().is_empty()));
         std::fs::write(&prompt_file, mate_prompt(&store.character_name(), persona.as_deref()))

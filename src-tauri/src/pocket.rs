@@ -161,7 +161,7 @@ impl Pocket {
     async fn spawn(&self, config: &Config) -> Result<Sidecar, String> {
         if !config.python.is_file() {
             return Err(format!(
-                "Python for Pocket TTS not found at {} (set pocket_python in settings.json to a venv with pocket-tts)",
+                "Python for Pocket TTS not found at {} (run Voice > Set up Pocket TTS… in the tray, or set pocket_python in settings.json to a venv with pocket-tts)",
                 config.python.display()
             ));
         }
@@ -348,11 +348,38 @@ fn send(pending: &Pending, id: u64, reply: Reply, last: bool) {
 
 /// The sidecar script shipped with the app.
 pub fn script_path(resource_dir: &Path) -> PathBuf {
-    let direct = resource_dir.join("pocket_server.py");
+    resource_file(resource_dir, "pocket_server.py")
+}
+
+/// The setup script (resources/setup-pocket.ps1) that installs Python and
+/// pocket-tts into `pocket/venv` in the data folder, where `find_python` looks.
+pub fn setup_script_path(resource_dir: &Path) -> PathBuf {
+    resource_file(resource_dir, "setup-pocket.ps1")
+}
+
+/// A bundled file: next to the exe when installed, under resources/ in a dev build.
+fn resource_file(resource_dir: &Path, name: &str) -> PathBuf {
+    let direct = resource_dir.join(name);
     if direct.is_file() {
         return direct;
     }
-    resource_dir.join("resources").join("pocket_server.py")
+    resource_dir.join("resources").join(name)
+}
+
+/// Opens the setup script in its own PowerShell window. Returns at once; the
+/// window stays open until the user closes it.
+pub fn open_setup(script: &Path, data_dir: &Path) -> Result<(), String> {
+    if !script.is_file() {
+        return Err(format!("{} is missing from the app folder", script.display()));
+    }
+    let mut cmd = std::process::Command::new("powershell.exe");
+    cmd.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]).arg(script).arg("-DataDir").arg(data_dir);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0000_0010); // CREATE_NEW_CONSOLE
+    }
+    cmd.spawn().map(|_| ()).map_err(|e| format!("Couldn't start PowerShell for the Pocket TTS setup: {e}"))
 }
 
 #[cfg(test)]

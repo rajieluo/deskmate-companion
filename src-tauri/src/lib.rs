@@ -447,8 +447,8 @@ async fn chat_send<R: Runtime>(
                 .claude_code_permission_mode
                 .clone()
                 .unwrap_or_else(|| claude_code::DEFAULT_PERMISSION_MODE.into()),
-            prompt_file: app.path().app_config_dir().map_err(|e| e.to_string())?.join("avatar-prompt.txt"),
-            sessions_dir: app.path().app_config_dir().map_err(|e| e.to_string())?.join("sessions"),
+            prompt_file: data_dir(&app)?.join("avatar-prompt.txt"),
+            sessions_dir: data_dir(&app)?.join("sessions"),
             name,
             character,
         };
@@ -647,7 +647,7 @@ fn stt_settings<R: Runtime>(app: &AppHandle<R>) -> Result<(String, String, std::
     let s = app.state::<Arc<ModelStore>>().settings();
     let name = s.stt_model.unwrap_or_else(|| stt::DEFAULT_MODEL.into());
     let language = s.stt_language.unwrap_or_else(|| "en".into());
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("whisper");
+    let dir = data_dir(app)?.join("whisper");
     Ok((name, language, dir))
 }
 
@@ -682,10 +682,25 @@ async fn tts_synthesize(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// Set to a folder to run the app with a separate set of settings, personas,
+/// history and downloads (for example to try a fresh install without touching
+/// your own). Credential Manager (API keys), the window position, the log, the
+/// WebView2 profile and the Hugging Face login are still shared.
+pub(crate) const DATA_DIR_ENV: &str = "DESKTOP_ASSISTANT_DATA_DIR";
+
+/// The app's data folder: `%APPDATA%\com.rajieluo.desktopassistant`, or
+/// `DESKTOP_ASSISTANT_DATA_DIR` when that is set. settings.json lives here too.
+pub(crate) fn data_dir<R: Runtime, M: Manager<R>>(app: &M) -> Result<std::path::PathBuf, String> {
+    match std::env::var_os(DATA_DIR_ENV).filter(|v| !v.is_empty()) {
+        Some(dir) => Ok(std::path::PathBuf::from(dir)),
+        None => app.path().app_data_dir().map_err(|e| e.to_string()),
+    }
+}
+
 /// Where the Pocket TTS sidecar comes from (see pocket.rs).
 fn pocket_config<R: Runtime>(app: &AppHandle<R>) -> Result<pocket::Config, String> {
     let s = app.state::<Arc<ModelStore>>().settings();
-    let data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let data = data_dir(app)?;
     let pocket_dir = data.join("pocket");
     let python = pocket::find_python(s.pocket_python.as_deref(), &pocket_dir);
     if python.is_file() {
@@ -698,6 +713,18 @@ fn pocket_config<R: Runtime>(app: &AppHandle<R>) -> Result<pocket::Config, Strin
         cache_dir: data.join("voice").join("pocket"),
         quantize: s.pocket_quantize.unwrap_or(true),
     })
+}
+
+/// Opens the Pocket TTS setup script in a PowerShell window (see pocket.rs).
+fn open_pocket_setup<R: Runtime>(app: &AppHandle<R>) {
+    let result = (|| {
+        let resources = app.path().resource_dir().map_err(|e| e.to_string())?;
+        pocket::open_setup(&pocket::setup_script_path(&resources), &data_dir(app)?)
+    })();
+    if let Err(e) = result {
+        log::error!("pocket voice: {e}");
+        let _ = app.emit("crew-error", e);
+    }
 }
 
 fn current_pocket_voice<R: Runtime>(app: &AppHandle<R>) -> Result<String, String> {
@@ -954,10 +981,11 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let engine_pocket =
         CheckMenuItem::with_id(app, "engine:pocket", "Engine: Pocket TTS (cloned voice)", true, engine == "pocket", None::<&str>)?;
     app.manage(EngineMenu { kokoro: engine_kokoro.clone(), pocket: engine_pocket.clone() });
+    let pocket_setup = MenuItem::with_id(app, "pocket_setup", "Set up Pocket TTS…", true, None::<&str>)?;
     let engine_sep = PredefinedMenuItem::separator(app)?;
     let voice_sep = PredefinedMenuItem::separator(app)?;
     let mut voice_refs: Vec<&dyn tauri::menu::IsMenuItem<R>> =
-        vec![&engine_kokoro, &engine_pocket, &engine_sep, &own_voice, &voice_sep];
+        vec![&engine_kokoro, &engine_pocket, &pocket_setup, &engine_sep, &own_voice, &voice_sep];
     voice_refs.extend(group_menus.iter().map(|m| m as &dyn tauri::menu::IsMenuItem<R>));
     let voice_menu = Submenu::with_items(app, "Voice", true, &voice_refs)?;
     app.manage(VoiceMenu(own_voice.clone(), voice_items));
@@ -1070,9 +1098,17 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             "quit" => app.exit(0),
             "engine:kokoro" | "engine:pocket" => {
                 let engine = event.id.as_ref().trim_start_matches("engine:").to_string();
+                let pocket = engine == "pocket";
                 app.state::<Arc<ModelStore>>().update(|s| s.voice_engine = Some(engine));
                 sync_engine(app, true);
+                // Picked Pocket TTS but it isn't installed yet: offer the setup right away.
+                // Kokoro keeps speaking until it's done.
+                if pocket && pocket_config(app).is_ok_and(|c| !c.python.is_file()) {
+                    log::info!("pocket voice: no Python with pocket-tts yet; opening the setup");
+                    open_pocket_setup(app);
+                }
             }
+            "pocket_setup" => open_pocket_setup(app),
             "voice:default" => {
                 app.state::<Arc<ModelStore>>().pick_voice(None);
                 sync_voice(app, true);
@@ -1176,10 +1212,9 @@ pub fn run() {
                 default_hook(info);
             }));
             log::info!("Desktop Assistant {} starting; {}", env!("CARGO_PKG_VERSION"), stt::cpu_summary());
-            let config_dir = app.path().app_config_dir()?;
+            let config_dir = data_dir(app)?;
             let first_run = !config_dir.join("settings.json").exists();
-            let documents = app.path().document_dir().ok();
-            let store = Arc::new(ModelStore::load(config_dir, documents));
+            let store = Arc::new(ModelStore::load(config_dir));
             // Saving now also marks later launches as "not first run".
             store.save();
             store.publish_persona();
@@ -1205,7 +1240,7 @@ pub fn run() {
             }
             app.manage(Arc::new(tts::Tts::default()));
             app.manage(Arc::new(pocket::Pocket::default()));
-            app.manage(Arc::new(History::new(app.path().app_data_dir()?)));
+            app.manage(Arc::new(History::new(data_dir(app)?)));
 
             build_tray(app.handle())?;
 

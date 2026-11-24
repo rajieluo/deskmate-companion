@@ -352,7 +352,7 @@ pub fn to_wsl_path(path: &Path) -> String {
 }
 
 pub(crate) fn helper_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::data_dir(app)?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join("crew.sh");
     if std::fs::read_to_string(&path).ok().as_deref() != Some(HELPER) {

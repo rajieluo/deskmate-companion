@@ -82,7 +82,7 @@ impl Tts {
         if self.session.lock().unwrap().is_some() {
             return Ok(());
         }
-        let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("voice");
+        let dir = crate::data_dir(app)?.join("voice");
         let variant = if variant_file(&options.variant).is_some() { options.variant.as_str() } else { DEFAULT_VARIANT };
         let model = download(app, &dir, variant).await?;
         let library = runtime_library(app).ok_or("onnxruntime.dll is missing from the app folder")?;

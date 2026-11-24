@@ -19,17 +19,17 @@ See **[INSTALL.md](INSTALL.md)** for the requirements of each mode (which items 
 
 | Mode | What it needs |
 |---|---|
-| Plain chat | The app, a Live2D model, and either an Anthropic API key with prepaid credits (the free Claude plan has no API access) or a free Google Gemini API key ([setup](#free-voice-chat-with-google-gemini)) |
+| Plain chat | The app, a Live2D or MMD model, and either an Anthropic API key with prepaid credits (the free Claude plan has no API access) or a free Google Gemini API key ([setup](#free-voice-chat-with-google-gemini)) |
 | Claude Code mode | Claude Code, signed in with a paid Claude plan or an API key |
 | Crew mode (firstmate) | Claude Code plus the firstmate setup: Git for Windows (Git Bash), Node.js and npm, Herdr, a GitHub login (`gh`) and a few more tools |
-| Voice output | Nothing extra: Kokoro runs locally for free. Kyutai Pocket TTS (cloned voices) is optional and needs Python |
+| Voice output | Nothing extra: Kokoro runs locally for free. Kyutai Pocket TTS (cloned voices) is optional; the tray's *Set up Pocket TTS…* installs it |
 | Voice input | A CPU with AVX2 (most PCs from 2015 on) and a microphone |
 
-INSTALL.md also covers [loading your own Live2D models, choosing or adding voices, and creating custom personas](INSTALL.md#6-your-own-models-voices-and-personas).
+INSTALL.md also covers [loading your own Live2D models, choosing or adding voices, and creating custom personas](INSTALL.md#5-personas-and-voices-for-each-model).
 
 ## Using it
 
-- **First run** loads `Documents\live2d models\1014100aqua\1014100.model3.json` if it exists. Otherwise it asks you to pick a `.model3.json` (Live2D) or `.pmx` (MMD) file.
+- **First run** asks you to pick a `.model3.json` (Live2D) or `.pmx` (MMD) file.
 - **Tray icon** (bottom right of the taskbar): *Choose model…*, *Reset position*, *Reload*, *Quit*.
 - **Right-click** her to open the same options menu as the tray icon.
 - **Drag** the character to move her. The position and size are remembered.
@@ -43,6 +43,10 @@ INSTALL.md also covers [loading your own Live2D models, choosing or adding voice
 - **Chat history**: the clock button in the chat box, or *Chat history…* in the tray, opens a window with every message, grouped by day and searchable. Messages are saved to `%APPDATA%\com.rajieluo.desktopassistant\history.jsonl`; *Clear…* in that window deletes them.
 - **Ctrl + mouse wheel** over her makes the window bigger or smaller.
 - **Keys 1 to 7** (after clicking her) play happy, sad, angry, surprised, shy, thinking and proud, so you can check a model's motions.
+
+## Sharing it with a friend
+
+Give them the installer and a link to [INSTALL.md](INSTALL.md); they bring their own model, key and voice. How to build the installer, what stays private, and what you may and may not pass on is in [Sharing the app with a friend](INSTALL.md#sharing-the-app-with-a-friend).
 
 ## Free voice chat with Google Gemini
 
@@ -110,7 +114,7 @@ Permissions: there is no one to click "Allow" in this mode, so it runs with `acc
 
 ## Crew mode (firstmate)
 
-Crew mode makes her the face of [firstmate](https://github.com/kunchenguid/firstmate), which runs several Claude Code sessions in parallel, each in its own git worktree. You talk to her; she passes it to firstmate's first mate, reads out its answers, and shows a badge for each task (blue working, amber needs you, green PR ready, red failed). *Crew sessions…* in the tray opens a window listing every crewmate with its status and timeline. Firstmate runs natively under Git Bash by default, or in WSL2. Setup: [INSTALL.md](INSTALL.md#4-crew-mode-firstmate); details: [docs/crew-setup.md](docs/crew-setup.md).
+Crew mode makes her the face of [firstmate](https://github.com/kunchenguid/firstmate), which runs several Claude Code sessions in parallel, each in its own git worktree. You talk to her; she passes it to firstmate's first mate, reads out its answers, and shows a badge for each task (blue working, amber needs you, green PR ready, red failed). *Crew sessions…* in the tray opens a window listing every crewmate with its status and timeline. Firstmate runs natively under Git Bash by default, or in WSL2. Setup: [INSTALL.md](INSTALL.md#8-optional-crew-mode-firstmate); details: [docs/crew-setup.md](docs/crew-setup.md).
 
 ### Announcements from the first mate
 
@@ -154,7 +158,7 @@ Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistan
 - `chat_effort`: `low` (default, quick chatty replies), `medium`, `high`, `xhigh` or `max`. With Gemini 3 and later models it sets the thinking level (`xhigh` and `max` both mean `XHIGH`); Gemini 2.x models ignore it.
 - `voice_enabled`, `voice`, `voice_speed`, `voice_pitch`: speech on or off, the Kokoro voice (`af_heart` by default; also `af_bella`, `af_nicole`, `af_sky`, `bf_emma` and [others](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md)), speed (0.5 to 2) and pitch (0.75 to 1.35). Speed and pitch also have sliders at the bottom of the poses panel; double-click a slider to reset it.
 - `voice_engine`: `"kokoro"` (default) or `"pocket"` for [Kyutai Pocket TTS](https://github.com/kyutai-labs/pocket-tts), which speaks in a voice cloned from a short recording and starts talking about 0.1 s after each sentence. The tray's **Voice** submenu switches between them. Pocket TTS is only used for models that have a cloned voice: `voice.safetensors` in the model folder (make it with `pocket-tts export-voice clip.wav voice.safetensors`), else `voice.wav` (10 to 30 s of clean speech; it is encoded once and cached), or `pocket_voice:` in `persona.md`'s front matter naming a file in the folder or a preset such as `alba`. Other models keep using Kokoro, and so does every sentence after Pocket TTS fails, so she never goes quiet. Speed and pitch apply to Kokoro only.
-- `pocket_python`, `pocket_quantize`: Pocket TTS runs in a Python sidecar ([setup](INSTALL.md#pocket-tts-cloned-voices)). Point `pocket_python` at the `python.exe` of a venv where you ran `pip install pocket-tts` (default: `pocket\venv\Scripts\python.exe` in the app's data folder). The last Python that worked is also remembered in `pocket\python.txt` in the data folder, so Pocket keeps working if `pocket_python` goes missing from settings.json. Voice cloning needs the gated weights: accept the terms at https://huggingface.co/kyutai/pocket-tts and run `hf auth login` once. `pocket_quantize` (default `true`) runs the model in int8, about 20% faster on the CPU.
+- `pocket_python`, `pocket_quantize`: Pocket TTS runs in a Python sidecar ([setup](INSTALL.md#6-optional-cloned-voices-with-pocket-tts)). Point `pocket_python` at the `python.exe` of a venv where `pocket-tts` is installed (default: `pocket\venv\Scripts\python.exe` in the app's data folder, which *Voice > Set up Pocket TTS…* creates). The last Python that worked is also remembered in `pocket\python.txt` in the data folder, so Pocket keeps working if `pocket_python` goes missing from settings.json. Voice cloning needs the gated weights: accept the terms at https://huggingface.co/kyutai/pocket-tts and log in once (the setup offers to). `pocket_quantize` (default `true`) runs the model in int8, about 20% faster on the CPU.
 - `stt_model`, `stt_language`: the Whisper model for voice input (`tiny.en`, `base.en` by default, `small.en` for better accuracy, or multilingual `small` with `"stt_language": "auto"`) and the spoken language.
 - `voice_device`: where the voice runs, `"cpu"` (default) or `"gpu"` (DirectML, any DirectX 12 card). The GPU is faster, but on some cards (an RX 7900 XT, for one) it garbles the speech; set it back to `"cpu"` if that happens (see [Troubleshooting](INSTALL.md#troubleshooting)).
 - `voice_model`: the Kokoro model variant, `q8` (default, about 90 MB), `q8f16`, `fp16` or `fp32` (about 325 MB). Use whichever runs fastest on your CPU.
@@ -172,7 +176,7 @@ Chat settings live in `settings.json` in `%APPDATA%\com.rajieluo.desktopassistan
 
 ### Per-model personas
 
-Each model can have its own personality in a persona file: `personas\<model folder name>.md` in the app's data folder, or `persona.md` in the model's own folder. Front matter in the model folder's `persona.md` can also set the model's voice (`voice:`, `pocket_voice:`). File locations, lookup order and format are in [INSTALL.md](INSTALL.md#custom-personas). Persona files for characters you don't own stay on your machine; don't commit them here.
+Each model can have its own personality in a persona file: `personas\<model folder name>.md` in the app's data folder, or `persona.md` in the model's own folder. Front matter in the model folder's `persona.md` can also set the model's voice (`voice:`, `pocket_voice:`). File locations, lookup order and format are in [INSTALL.md](INSTALL.md#personas). Persona files for characters you don't own stay on your machine; don't commit them here.
 
 Claude starts each reply with an emotion tag such as `[happy]`. The app strips the tags from the text and plays the matching motion. The API call is made from the Rust side, so the key never reaches the web page. Server-side refusal fallbacks are turned on, so if Claude Opus 5.5 declines a message the API retries it on a fallback model in the same call.
 
@@ -184,7 +188,7 @@ The app writes a log to `%LOCALAPPDATA%\com.rajieluo.desktopassistant\logs\Deskt
 
 Models are loaded from your own folder and are **never committed** to this repo (`.gitignore` blocks Live2D and MMD model files). The app only reads files inside the folder of the model you picked.
 
-Any Cubism 3/4 model (`.model3.json`) works; load one with **Choose model…** in the tray ([details](INSTALL.md#live2d-models)). Many models put all their motions in one unnamed group, so the app sorts them by file name:
+Any Cubism 3/4 model (`.model3.json`) works; load one with **Choose model…** in the tray ([details](INSTALL.md#2-get-a-model-and-pick-it)). Many models put all their motions in one unnamed group, so the app sorts them by file name:
 
 - `Wait`, `Idle`, `Stand`, `Breath`… become the idle loop.
 - `Happy`/`Smile`, `Sad`/`Cry`/`Upset`, `Anger`, `Surprise`, `Shame`/`Shy`, `Puzzle`/`Doubt`/`Serious`, `Pride` become emotions (including the pinyin names some models use, like `weixiao` or `shengqi`).
@@ -223,4 +227,4 @@ Tauri can only make a whole window ignore the mouse. So the Rust side polls the 
 - [Babylon.js](https://github.com/BabylonJS/Babylon.js) (Apache-2.0) and [babylon-mmd](https://github.com/noname0310/babylon-mmd) (MIT) render MMD models.
 - [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT) through [whisper-rs](https://github.com/tazz4843/whisper-rs) (Unlicense) does speech to text.
 - [kokoro-js](https://www.npmjs.com/package/kokoro-js) (Apache-2.0) and the Kokoro-82M model (Apache-2.0) do text to speech.
-- [Kyutai Pocket TTS](https://github.com/kyutai-labs/pocket-tts) is optional and not bundled: you install it yourself with pip, under its own license, and its weights are gated on Hugging Face.
+- [Kyutai Pocket TTS](https://github.com/kyutai-labs/pocket-tts) is optional and not bundled: the setup script downloads it (with [uv](https://github.com/astral-sh/uv) and PyTorch) from PyPI on the user's PC, under its own license, and its voice-cloning weights are gated on Hugging Face.
