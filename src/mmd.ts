@@ -43,7 +43,7 @@ import { MmdBulletPhysics } from "babylon-mmd/esm/Runtime/Optimized/Physics/mmdB
 
 import type { Character } from "./character";
 import * as host from "./host";
-import { isChestBody, steadyPhysics } from "./mmd-physics";
+import { bodyKind, steadyPhysics } from "./mmd-physics";
 import { upgradeVmd } from "./vmd";
 import { builtinDancePose, type DanceMotion } from "./dance";
 import { GESTURES, gesturePose, type FaceRole, type Gesture } from "./gestures";
@@ -93,6 +93,8 @@ export class MmdAvatar implements Character {
   /** When the built-in dance started, while it plays. */
   private builtinDance: number | null = null;
   private danceMusic: HTMLAudioElement | null = null;
+  /** Whether the window is widened for a dance. */
+  private wideWindow = false;
   /** Cancels a dance still loading when something else starts. */
   private danceId = 0;
   /** How much the head and body follow the cursor (eased to 0 while dancing). */
@@ -100,7 +102,7 @@ export class MmdAvatar implements Character {
   /** A motion picked in the picker; loops instead of the folder's idle. */
   private pickedIdle: VmdFile | null | undefined = undefined;
   private modelUrl = "";
-  private info = { name: "", rigidBodies: 0, chest: [] as string[] };
+  private info = { name: "", rigidBodies: 0, chest: [] as string[], hair: 0, clothing: 0, heavy: 0 };
 
   /** Model height range in world units (feet at minY). */
   private minY = 0;
@@ -226,7 +228,10 @@ export class MmdAvatar implements Character {
     this.info = {
       name: meta.header.modelName,
       rigidBodies: meta.rigidBodies.length,
-      chest: meta.rigidBodies.filter((b) => b.physicsMode !== 0 && isChestBody(b.name)).map((b) => b.name),
+      chest: meta.rigidBodies.filter((b) => b.physicsMode !== 0 && bodyKind(b.name) === "chest").map((b) => b.name),
+      hair: meta.rigidBodies.filter((b) => b.physicsMode !== 0 && bodyKind(b.name) === "hair").length,
+      clothing: meta.rigidBodies.filter((b) => b.physicsMode !== 0 && bodyKind(b.name) === "clothing").length,
+      heavy: meta.rigidBodies.filter((b) => b.physicsMode !== 0 && bodyKind(b.name) === "heavy").length,
     };
     // Heavier, steadier hair, chest and clothes (read when the physics is built below).
     const steady = steadyPhysics(meta.rigidBodies, meta.joints);
@@ -280,6 +285,7 @@ export class MmdAvatar implements Character {
 
   dispose() {
     this.disposed = true;
+    if (this.wideWindow) host.danceWindow(false);
     this.loadId++;
     this.endDance();
     window.removeEventListener("resize", this.onResize);
@@ -617,6 +623,12 @@ export class MmdAvatar implements Character {
     const identity = Quaternion.Identity();
     for (const b of controlled) b.setRotationQuaternion(identity, Space.LOCAL);
 
+    // Widen the window while she dances, so big moves stay in view.
+    if (this.dancing !== this.wideWindow) {
+      this.wideWindow = this.dancing;
+      host.danceWindow(this.wideWindow);
+    }
+
     // 1. The motion, if any (looped by hand: the runtime itself stays paused).
     const p = this.playing;
     if (p && mmd.currentAnimation) {
@@ -755,7 +767,7 @@ export class MmdAvatar implements Character {
       `mmd ${this.info.name}`,
       `bones ${this.bones.size}`,
       `morphs ${this.morphNames.length}`,
-      `rigid bodies ${this.info.rigidBodies} (chest: ${this.info.chest.join(",") || "none"})`,
+      `rigid bodies ${this.info.rigidBodies} (hair ${this.info.hair}, clothing ${this.info.clothing}, coats ${this.info.heavy}, chest: ${this.info.chest.join(",") || "none"})`,
       `blink ${this.rig.blink}`,
       `mouth ${this.rig.mouth}`,
       `emotions ${Object.keys(this.rig.emotions).join(",")}`,

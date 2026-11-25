@@ -105,6 +105,28 @@ export async function resizeWindow(factor: number) {
   await w.setSize(new LogicalSize(width, height));
 }
 
+let narrowWidth = 0;
+
+/** Keeps the chat bar, bubble and menus at the normal width while the window is wide. */
+function keepOverlaysNarrow() {
+  const inset = narrowWidth ? Math.max(0, (window.innerWidth - narrowWidth) / 2) : 0;
+  document.documentElement.style.setProperty("--inset", `${inset}px`);
+}
+
+/** Widens the window while she dances (`wide`), or puts it back. */
+export function danceWindow(wide: boolean) {
+  if (!inTauri) return;
+  if (wide && !narrowWidth) {
+    narrowWidth = window.innerWidth;
+    window.addEventListener("resize", keepOverlaysNarrow);
+  } else if (!wide && narrowWidth) {
+    narrowWidth = 0;
+    window.removeEventListener("resize", keepOverlaysNarrow);
+    keepOverlaysNarrow();
+  }
+  void invoke("dance_window", { wide }).catch((e) => console.warn("[window]", e));
+}
+
 // --- Claude chat (runs on the Rust side; see src-tauri/src/chat.rs).
 
 export interface ChatStatus {

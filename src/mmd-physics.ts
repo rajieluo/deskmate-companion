@@ -40,10 +40,15 @@ export interface PhysicsTuning {
   spring: number;
   /** Lowest spring strength, for joints the model left without one. */
   minSpring: number;
+  /** Set damping outright (move, rotation) instead of moving the model's own towards 1. */
+  setDamping?: [move: number, rotation: number];
 }
 
-/** Heavier, steadier clothes and hair: Roger found the model's own values far too floaty. */
+/** Heavier, steadier hair: Roger found the model's own values far too floaty. */
 export const STEADY: PhysicsTuning = { damping: 0.5, swing: 0.7, stretch: 0.2, spring: 1, minSpring: 0 };
+
+/** Clothing (skirts, ribbons, coats, tails…): less floaty and a little stiffer than the hair. */
+export const STEADY_CLOTHING: PhysicsTuning = { damping: 0.7, swing: 0.6, stretch: 0.15, spring: 1.5, minSpring: 0 };
 
 /** The chest, stiffer still (Roger asked twice for a stiffer chest). */
 export const STEADY_CHEST: PhysicsTuning = { damping: 0.9, swing: 0.15, stretch: 0, spring: 4, minSpring: 200 };
@@ -54,6 +59,41 @@ const CHEST = /胸|乳|おっぱい|オッパイ|bust|breast|boob|oppai|chest|mu
 export function isChestBody(name: string): boolean {
   return CHEST.test(name);
 }
+
+/** Rigid body names used for hair (Japanese, Chinese, English). */
+const HAIR = /髪|もみあげ|揉み上げ|ツインテ|おさげ|アホ毛|あほ毛|三つ編み|发|hair|ahoge|bang|ponytail|twintail|braid|sideburn|リボン|ribbon/i;
+
+/** Heavy coats and capes. */
+const HEAVY = /コート|マント|ケープ|外套|上着|ジャケット|coat|cape|cloak|mantle|jacket/i;
+
+export function isHairBody(name: string): boolean {
+  return HAIR.test(name);
+}
+
+export type BodyKind = "chest" | "hair" | "heavy" | "clothing";
+
+/** What a simulated body is, by its name: chest, hair, or (anything else) clothing. */
+export function bodyKind(name: string): BodyKind {
+  if (isChestBody(name)) return "chest";
+  if (isHairBody(name)) return "hair";
+  if (HEAVY.test(name)) return "heavy";
+  return "clothing";
+}
+
+export type PhysicsTunings = Record<BodyKind, PhysicsTuning>;
+
+/**
+ * Test build: damping from Roger's table, per material (move, rotation):
+ * long hair / ribbons 0.5–0.8 / 0.7–0.95, light skirts 0.6–0.85 / 0.8–0.99,
+ * heavy coats / capes 0.8–0.95 / 0.9–0.999, chest 0.85–0.99 / 0.85–0.99.
+ * Middle of each range; swing, stretch and springs as before.
+ */
+export const TUNINGS: PhysicsTunings = {
+  hair: { ...STEADY, setDamping: [0.65, 0.85] },
+  clothing: { ...STEADY_CLOTHING, setDamping: [0.75, 0.9] },
+  heavy: { ...STEADY_CLOTHING, setDamping: [0.88, 0.95] },
+  chest: { ...STEADY_CHEST, setDamping: [0.92, 0.92] },
+};
 
 const MAX_DAMPING = 0.995;
 
@@ -70,23 +110,31 @@ const stiffen = (v: Vec3, t: PhysicsTuning): Vec3 =>
 export function steadyPhysics<B extends BodyLike, J extends JointLike>(
   bodies: readonly B[],
   joints: readonly J[],
-  tuning: PhysicsTuning = STEADY,
-  chest: PhysicsTuning = STEADY_CHEST,
+  tunings: PhysicsTunings = TUNINGS,
 ): { bodies: B[]; joints: J[] } {
-  const chestBody = bodies.map((b) => b.physicsMode !== 0 && isChestBody(b.name));
+  const kinds = bodies.map((b) => (b.physicsMode === 0 ? null : bodyKind(b.name)));
+  // A joint takes the stiffest kind among the simulated bodies it holds: chest, then clothing, then hair.
+  const jointKind = (a: number, b: number): BodyKind => {
+    const k = [kinds[a], kinds[b]];
+    if (k.includes("chest")) return "chest";
+    if (k.includes("heavy")) return "heavy";
+    if (k.includes("clothing")) return "clothing";
+    if (k.includes("hair")) return "hair";
+    return "clothing";
+  };
   return {
     bodies: bodies.map((b, i) => {
-      if (b.physicsMode === 0) return b;
-      const t = chestBody[i] ? chest : tuning;
+      const kind = kinds[i];
+      if (!kind) return b;
+      const t = tunings[kind];
       return {
         ...b,
-        linearDamping: towardsOne(b.linearDamping, t.damping),
-        angularDamping: towardsOne(b.angularDamping, t.damping),
+        linearDamping: t.setDamping ? t.setDamping[0] : towardsOne(b.linearDamping, t.damping),
+        angularDamping: t.setDamping ? t.setDamping[1] : towardsOne(b.angularDamping, t.damping),
       };
     }),
     joints: joints.map((j) => {
-      // A joint holding a simulated chest body uses the chest tuning.
-      const t = chestBody[j.rigidbodyIndexA] || chestBody[j.rigidbodyIndexB] ? chest : tuning;
+      const t = tunings[jointKind(j.rigidbodyIndexA, j.rigidbodyIndexB)];
       return {
         ...j,
         positionMin: scale(j.positionMin, t.stretch),
