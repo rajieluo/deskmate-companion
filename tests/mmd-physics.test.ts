@@ -19,8 +19,8 @@ describe("steadyPhysics", () => {
     const { bodies } = steadyPhysics([follow, hair], []);
     expect(bodies[0]).toBe(follow);
     expect(bodies[1].name).toBe("hair");
-    expect(bodies[1].linearDamping).toBeCloseTo(0.75);
-    expect(bodies[1].angularDamping).toBeCloseTo(0.6);
+    expect(bodies[1].linearDamping).toBeCloseTo(0.825);
+    expect(bodies[1].angularDamping).toBeCloseTo(0.72);
     // The model's own data isn't changed.
     expect(hair.linearDamping).toBe(0.5);
   });
@@ -36,8 +36,8 @@ describe("steadyPhysics", () => {
     const { joints } = steadyPhysics([hair("後髪1"), hair("後髪2")], [joint()]);
     expect(joints[0].positionMax).toEqual([0.2, 0.4, 0]);
     expect(joints[0].positionMin[1]).toBeCloseTo(-0.4);
-    expect(joints[0].rotationMax[0]).toBeCloseTo(0.7);
-    expect(joints[0].rotationMin[1]).toBeCloseTo(-0.35);
+    expect(joints[0].rotationMax[0]).toBeCloseTo(0.85);
+    expect(joints[0].rotationMin[1]).toBeCloseTo(-0.425);
     expect(joints[0].name).toBe("j");
   });
 
@@ -46,25 +46,25 @@ describe("steadyPhysics", () => {
     const chest = { name: "左胸", linearDamping: 0.5, angularDamping: 0.5, physicsMode: 1 };
     const skirt = { name: "スカート", linearDamping: 0.5, angularDamping: 0.5, physicsMode: 1 };
     const { bodies, joints } = steadyPhysics([body, chest, skirt], [joint(0, 1), joint(0, 2)]);
-    expect(bodies[1].linearDamping).toBeCloseTo(0.95);
-    expect(bodies[2].linearDamping).toBeCloseTo(0.85);
-    expect(joints[0].rotationMax[0]).toBeCloseTo(0.15);
+    expect(bodies[1].linearDamping).toBeCloseTo(0.975);
+    expect(bodies[2].linearDamping).toBeCloseTo(0.9);
+    expect(joints[0].rotationMax[0]).toBeCloseTo(0.25);
     expect(joints[0].springRotation).toEqual([400, 200, 200]);
     expect(joints[1].springRotation).toEqual([150, 0, 75]);
     expect(joints[0].positionMax[0]).toBeCloseTo(0);
-    expect(joints[1].rotationMax[0]).toBeCloseTo(0.6);
+    expect(joints[1].rotationMax[0]).toBeCloseTo(0.75);
     expect(joints[1].positionMax[0]).toBeCloseTo(0.15);
   });
 
   it("makes clothing stiffer than hair", () => {
     const sim = (name: string) => ({ name, linearDamping: 0.5, angularDamping: 0.5, physicsMode: 1 });
     const { bodies, joints } = steadyPhysics([sim("前髪"), sim("スカート"), sim("リボン")], [joint(0, 0), joint(1, 2), joint(0, 1)]);
-    expect(bodies[0].linearDamping).toBeCloseTo(0.75);
-    expect(bodies[1].linearDamping).toBeCloseTo(0.85);
-    expect(joints[0].rotationMax[0]).toBeCloseTo(0.7);
-    expect(joints[1].rotationMax[0]).toBeCloseTo(0.6);
+    expect(bodies[0].linearDamping).toBeCloseTo(0.825);
+    expect(bodies[1].linearDamping).toBeCloseTo(0.9);
+    expect(joints[0].rotationMax[0]).toBeCloseTo(0.85);
+    expect(joints[1].rotationMax[0]).toBeCloseTo(0.75);
     // A joint between hair and clothing takes the clothing's (stiffer) tuning.
-    expect(joints[2].rotationMax[0]).toBeCloseTo(0.6);
+    expect(joints[2].rotationMax[0]).toBeCloseTo(0.75);
   });
 
   it("sorts bodies into chest, hair and clothing by name", () => {
