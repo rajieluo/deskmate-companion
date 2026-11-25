@@ -125,6 +125,8 @@ export interface VmdFile {
 export interface VmdSet {
   /** Loops while nothing else plays. Null means the built-in breathing idle. */
   idle: VmdFile | null;
+  /** Every idle-looking motion; one is picked at random each time the model loads. */
+  idles: VmdFile[];
   /** Played once for an emotion, then back to idle. */
   emotions: Partial<Record<Emotion, VmdFile>>;
   /** Played once for a gesture (laugh.vmd, yawn.vmd…) in place of the built-in one. */
@@ -159,7 +161,24 @@ export function sortVmds(files: readonly string[]): VmdSet {
   }
   // Idle packs come in styles (cool, cute, hands on hips…); start with the plain one.
   const idle = idles.find((v) => PLAIN_IDLE.test(v.label)) ?? idles[0] ?? null;
-  return { idle, emotions, gestures, all };
+  return { idle, emotions, gestures, all, idles };
+}
+
+/** Copies of an idle with blinking keyed in (the app blinks on its own). */
+const BAKED_BLINK = /まばたき付き|with blink/i;
+/** Idles that look wrong as a resting pose (猫背 "slouch"); still in the picker. */
+const NOT_RANDOM = /猫背|slouch|hunch/i;
+
+/**
+ * A random idle for this start, different from last time's when there's a choice.
+ * Skips blink-baked copies and slouching poses when there are others to pick.
+ */
+export function randomIdle(idles: readonly VmdFile[], last: string | null, rand: () => number = Math.random): VmdFile | null {
+  const plain = idles.filter((v) => !BAKED_BLINK.test(v.label) && !NOT_RANDOM.test(v.label));
+  let pool = plain.length ? plain : [...idles];
+  if (pool.length > 1) pool = pool.filter((v) => v.file !== last);
+  if (!pool.length) return null;
+  return pool[Math.min(pool.length - 1, Math.floor(rand() * pool.length))];
 }
 
 /** Bone names of the standard MMD skeleton the app moves itself. */
