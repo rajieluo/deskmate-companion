@@ -1,6 +1,6 @@
 [package]
 name = "desktop-assistant"
-version = "0.1.0"
+version = "0.2.0"
 description = "A Claude-powered Live2D desktop companion"
 edition = "2021"
 
