@@ -1,7 +1,7 @@
 // Speech bubble + text box for talking to Claude.
 import type { Character } from "./character";
 import * as host from "./host";
-import { SentenceBuffer, speakable } from "./sentences";
+import { SentenceBuffer, actionMoods, speakable } from "./sentences";
 import { TagStream } from "./tags";
 import { setLinkedText } from "./links";
 import { Mic } from "./mic";
@@ -290,8 +290,14 @@ export class ChatUI {
     this.activity.hidden = true;
     this.say(plain);
     const sentences = new SentenceBuffer();
-    for (const s of [...sentences.push(plain), ...sentences.flush()]) this.voice.say(speakable(s));
+    for (const s of [...sentences.push(plain), ...sentences.flush()]) this.speak(s);
     this.scheduleHide(Math.min(30000, 5000 + plain.split(/\s+/).length * 350));
+  }
+
+  /** Speaks one sentence; "*giggles*"-style actions are acted out (when a mood fits) rather than read aloud. */
+  private speak(sentence: string) {
+    for (const mood of actionMoods(sentence)) this.avatar.emote(mood);
+    this.voice.say(speakable(sentence));
   }
 
   /** Claude Code asked for a new session: the app has already dropped the old one. */
@@ -351,7 +357,7 @@ export class ChatUI {
     if (text) {
       this.bubble.classList.remove("thinking");
       this.append(text);
-      for (const s of lines) this.voice.say(speakable(s));
+      for (const s of lines) this.speak(s);
     }
   }
 
@@ -372,7 +378,7 @@ export class ChatUI {
     this.append(rest);
     const lines = [...this.sentences.push(rest), ...this.sentences.flush()];
     this.gestureFrom([], lines);
-    for (const s of lines) this.voice.say(speakable(s));
+    for (const s of lines) this.speak(s);
     this.bubble.classList.remove("thinking");
     host.historyAppend("assistant", this.bubbleRaw);
     const words = this.bubbleRaw.split(/\s+/).length;
