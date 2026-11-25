@@ -29,6 +29,7 @@ import { Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { Scene } from "@babylonjs/core/scene";
 import { VmdLoader } from "babylon-mmd/esm/Loader/vmdLoader";
+import type { MmdAnimation } from "babylon-mmd/esm/Loader/Animation/mmdAnimation";
 import type { MmdModelMetadata } from "babylon-mmd/esm/Loader/mmdModelMetadata";
 import { MmdStandardMaterialProxy } from "babylon-mmd/esm/Runtime/mmdStandardMaterialProxy";
 import type { MmdModel } from "babylon-mmd/esm/Runtime/mmdModel";
@@ -41,7 +42,9 @@ import { MultiPhysicsRuntime } from "babylon-mmd/esm/Runtime/Optimized/Physics/B
 import { MmdBulletPhysics } from "babylon-mmd/esm/Runtime/Optimized/Physics/mmdBulletPhysics";
 
 import type { Character } from "./character";
+import * as host from "./host";
 import { isChestBody, steadyPhysics } from "./mmd-physics";
+import { upgradeVmd } from "./vmd";
 import { builtinDancePose, type DanceMotion } from "./dance";
 import { GESTURES, gesturePose, type FaceRole, type Gesture } from "./gestures";
 import { BONES, blinkWeight, envelope, faceRig, findBone, sortVmds, type FaceRig, type VmdFile, type VmdSet } from "./mmd-face";
@@ -366,7 +369,17 @@ export class MmdAvatar implements Character {
     const known = this.handles.get(key);
     if (known) return known;
     const mmd = this.mmd!;
-    const animation = await new VmdLoader(this.scene).loadAsync(label, urls.length === 1 ? urls[0] : urls);
+    // Fetched here (not by the loader) so old-format .vmd files can be upgraded first.
+    const buffers = await Promise.all(
+      urls.map(async (url) => {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status} for ${decodeURIComponent(url.split("/").pop() ?? url)}`);
+        return upgradeVmd(await res.arrayBuffer());
+      }),
+    );
+    const animation = await new Promise<MmdAnimation>((resolve, reject) =>
+      new VmdLoader(this.scene).loadFromBuffer(label, buffers, resolve, undefined, reject),
+    );
     if (this.mmd !== mmd) throw new Error("superseded");
     const handle = mmd.createRuntimeAnimation(animation);
     this.handles.set(key, handle);
@@ -379,6 +392,7 @@ export class MmdAvatar implements Character {
     if (!file) {
       this.playing = null;
       mmd.setRuntimeAnimation(null);
+      resetState(mmd);
       return;
     }
     const url = new URL(file.file.split("/").map(encodeURIComponent).join("/"), this.modelUrl).href;
@@ -390,7 +404,8 @@ export class MmdAvatar implements Character {
   private start(handle: MmdRuntimeAnimationHandle, key: string, loop: boolean, dance: boolean) {
     const mmd = this.mmd!;
     mmd.setRuntimeAnimation(handle);
-    const endFrame = mmd.currentAnimation?.animation.endFrame ?? 0;
+    resetState(mmd);
+    const endFrame = motionEnd(mmd.currentAnimation?.animation);
     this.playing = { key, dance, handle, endFrame, loop, start: performance.now() };
   }
 
@@ -432,6 +447,7 @@ export class MmdAvatar implements Character {
       if (id !== this.danceId) return false;
     }
     this.start(handle, motion.name, false, true);
+    host.log("info", `[mmd] dance ${motion.name}: ${(this.playing!.endFrame / 30).toFixed(1)} s of motion${music ? `, music ${music.duration.toFixed(1)} s` : ""}`);
     if (music) {
       // Follow the music's clock from now on; the motion's frames are 1/30 s.
       const m = music;
@@ -456,9 +472,20 @@ export class MmdAvatar implements Character {
     }
     if (this.playing?.dance) this.playing = null;
     if (this.danceMusic) {
-      this.danceMusic.pause();
-      this.danceMusic.removeAttribute("src");
+      // Fade out rather than cut: a motion often ends before its song does.
+      const music = this.danceMusic;
       this.danceMusic = null;
+      const from = music.volume;
+      const started = performance.now();
+      const fade = window.setInterval(() => {
+        const k = 1 - (performance.now() - started) / 1500;
+        if (k > 0) music.volume = from * k;
+        else {
+          window.clearInterval(fade);
+          music.pause();
+          music.removeAttribute("src");
+        }
+      }, 50);
     }
   }
 
@@ -594,16 +621,17 @@ export class MmdAvatar implements Character {
     const p = this.playing;
     if (p && mmd.currentAnimation) {
       let frame = ((now - p.start) / 1000) * 30;
+      let ended = false;
       if (frame >= p.endFrame) {
         if (p.loop) frame = p.endFrame > 0 ? frame % p.endFrame : 0;
-        else {
-          if (p.dance) this.endDance();
-          this.playing = null;
-          void this.startIdle();
-          frame = p.endFrame;
-        }
+        else ended = true;
       }
-      mmd.currentAnimation.animate(frame);
+      if (ended) {
+        if (p.dance) this.endDance();
+        this.playing = null;
+        // Resets the pose and whatever the motion switched (IK, morphs), then the idle takes over.
+        void this.startIdle();
+      } else mmd.currentAnimation.animate(frame);
     }
 
     // 2. Built-in idle: arms down, breathing and a slow sway.
@@ -738,6 +766,40 @@ export class MmdAvatar implements Character {
     ];
     return Promise.resolve(parts.join("; "));
   }
+}
+
+/**
+ * Undoes what a motion left behind besides the pose: morph weights, IK switched
+ * off and rigid bodies switched to follow their bones. babylon-mmd only does this
+ * itself while its runtime plays, and here the runtime stays paused.
+ */
+function resetState(mmd: MmdModel) {
+  mmd.morph.resetMorphWeights();
+  mmd.ikSolverStates.fill(1);
+  mmd.rigidBodyStates.fill(1);
+}
+
+/**
+ * The last frame that moves the model: bone and morph keyframes only. The IK
+ * on/off and camera tracks some motions carry can run long past the dance, which
+ * would leave her standing frozen until they end.
+ */
+function motionEnd(
+  animation:
+    | {
+        endFrame: number;
+        boneTracks?: readonly { endFrame: number }[];
+        movableBoneTracks?: readonly { endFrame: number }[];
+        morphTracks?: readonly { endFrame: number }[];
+      }
+    | undefined,
+): number {
+  if (!animation) return 0;
+  let end = 0;
+  for (const tracks of [animation.boneTracks, animation.movableBoneTracks, animation.morphTracks]) {
+    for (const t of tracks ?? []) end = Math.max(end, t.endFrame);
+  }
+  return end > 0 ? Math.min(end, animation.endFrame) : animation.endFrame;
 }
 
 /** Lowest and highest vertex Y of the model in its rest pose. */
