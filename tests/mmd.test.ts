@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { modelKind } from "../src/character";
-import { blinkWeight, envelope, faceRig, sortVmds } from "../src/mmd-face";
+import { blinkWeight, envelope, faceRig, randomIdle, sortVmds } from "../src/mmd-face";
 
 // Morph names from the Ellen sample (standard Japanese MMD names).
 const ELLEN = ["まばたき", "ウィンク", "笑い", "びっくり右", "びっくり左", "じと目", "怒り目", "悲しむ", "喜び", "真面目", "困る", "怒り", "にこり", "上", "あ", "い", "う", "え", "お", "にやり", "にっこり", "へ", "口角下げ"];
@@ -68,5 +68,40 @@ describe("sortVmds", () => {
 
   it("has no idle when nothing looks like one", () => {
     expect(sortVmds(["Dance.vmd"]).idle).toBeNull();
+  });
+});
+
+describe("randomIdle", () => {
+  const set = sortVmds([
+    "pack/ot0510_待機_カッコつけ.vmd",
+    "pack/ot0510_待機_カッコつけ_まばたき付き.vmd",
+    "pack/ot0510_待機_素立ち.vmd",
+    "pack/ot0510_待機_元気.vmd",
+    "pack/ot0510_待機_猫背.vmd",
+    "pack/ot0510_Aスタンス.vmd",
+  ]);
+
+  it("lists every idle-looking motion", () => {
+    expect(set.idles).toHaveLength(5);
+  });
+
+  it("never repeats last start's idle and skips blink-baked copies", () => {
+    for (let i = 0; i < 20; i++) {
+      const pick = randomIdle(set.idles, "pack/ot0510_待機_素立ち.vmd", () => i / 20);
+      expect(pick).not.toBeNull();
+      expect(pick!.file).not.toBe("pack/ot0510_待機_素立ち.vmd");
+      expect(pick!.label).not.toMatch(/まばたき付き|猫背/);
+    }
+  });
+
+  it("can land on each plain idle", () => {
+    const seen = new Set([0, 0.4, 0.8, 0.99].map((r) => randomIdle(set.idles, null, () => r)!.file));
+    expect(seen.size).toBe(3);
+  });
+
+  it("keeps the only idle and returns null for none", () => {
+    const one = sortVmds(["idle.vmd"]).idles;
+    expect(randomIdle(one, "idle.vmd")?.file).toBe("idle.vmd");
+    expect(randomIdle([], null)).toBeNull();
   });
 });

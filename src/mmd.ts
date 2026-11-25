@@ -47,7 +47,7 @@ import { isChestBody, steadyPhysics } from "./mmd-physics";
 import { upgradeVmd } from "./vmd";
 import { builtinDancePose, type DanceMotion } from "./dance";
 import { GESTURES, gesturePose, type FaceRole, type Gesture } from "./gestures";
-import { BONES, blinkWeight, envelope, faceRig, findBone, sortVmds, type FaceRig, type VmdFile, type VmdSet } from "./mmd-face";
+import { BONES, blinkWeight, envelope, faceRig, findBone, randomIdle, sortVmds, type FaceRig, type VmdFile, type VmdSet } from "./mmd-face";
 import type { Emotion, MotionSummary } from "./motions";
 import type { ModelActions } from "./poses";
 
@@ -56,6 +56,7 @@ const FPS = 30;
 const VMD_GROUP = "vmd";
 const BUILTIN_GROUP = "builtin";
 const GESTURE_GROUP = "gesture";
+const RANDOM_GROUP = "random";
 const MORPH_PREFIX = "morph:";
 /** A gesture asked for sooner than this after the last one is skipped. */
 const GESTURE_GAP_MS = 1500;
@@ -87,7 +88,7 @@ export class MmdAvatar implements Character {
   private rig: FaceRig = { blink: null, mouth: null, emotions: {}, roles: {} };
   private morphNames: string[] = [];
   private bones = new Map<string, IMmdRuntimeLinkedBone>();
-  private vmds: VmdSet = { idle: null, emotions: {}, gestures: {}, all: [] };
+  private vmds: VmdSet = { idle: null, idles: [], emotions: {}, gestures: {}, all: [] };
   private handles = new Map<string, MmdRuntimeAnimationHandle>();
   private playing: Playing | null = null;
   /** When the built-in dance started, while it plays. */
@@ -243,6 +244,7 @@ export class MmdAvatar implements Character {
     this.playing = null;
     this.idleKey = `mmd-idle:${key}`;
     this.pickedIdle = loadPickedIdle(this.idleKey, this.vmds);
+    if (this.pickedIdle === undefined) this.vmds.idle = this.shuffleIdle();
     this.touched.clear();
     this.toggled.clear();
     this.emotion = null;
@@ -250,6 +252,7 @@ export class MmdAvatar implements Character {
     this.actions = {
       expressions: this.morphNames.map((name) => ({ label: name, file: MORPH_PREFIX + name })),
       motions: [
+        ...(this.vmds.idles.length > 1 ? [{ label: "Random idle (new each start)", group: RANDOM_GROUP, index: 0, face: false }] : []),
         { label: "Built-in idle", group: BUILTIN_GROUP, index: 0, face: false },
         ...this.vmds.all.map((v, index) => ({ label: v.label, group: VMD_GROUP, index, face: false })),
         // Each gesture once, built in or from its .vmd.
@@ -498,6 +501,24 @@ export class MmdAvatar implements Character {
     center.position = rest;
   }
 
+  /** Picks this start's idle at random (not the same as last start's) and remembers it. */
+  private shuffleIdle(): VmdFile | null {
+    const lastKey = `${this.idleKey}:last`;
+    let last: string | null = null;
+    try {
+      last = localStorage.getItem(lastKey);
+    } catch {
+      /* storage unavailable */
+    }
+    const idle = randomIdle(this.vmds.idles, last) ?? this.vmds.idle;
+    try {
+      if (idle) localStorage.setItem(lastKey, idle.file);
+    } catch {
+      /* storage unavailable */
+    }
+    return idle;
+  }
+
   private startIdle() {
     const idle = this.pickedIdle !== undefined ? this.pickedIdle : this.vmds.idle;
     return this.play(idle, true).catch((e) => console.warn("[mmd] idle motion failed", e));
@@ -515,6 +536,17 @@ export class MmdAvatar implements Character {
       return;
     }
     this.endDance();
+    if (group === RANDOM_GROUP) {
+      this.pickedIdle = undefined;
+      this.vmds.idle = this.shuffleIdle();
+      try {
+        localStorage.removeItem(this.idleKey);
+      } catch {
+        /* storage unavailable */
+      }
+      void this.startIdle();
+      return;
+    }
     if (group === BUILTIN_GROUP) this.pickedIdle = null;
     else if (group === VMD_GROUP && this.vmds.all[index]) this.pickedIdle = this.vmds.all[index];
     else return;
