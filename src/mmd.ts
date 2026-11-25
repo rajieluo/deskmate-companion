@@ -41,6 +41,7 @@ import { MultiPhysicsRuntime } from "babylon-mmd/esm/Runtime/Optimized/Physics/B
 import { MmdBulletPhysics } from "babylon-mmd/esm/Runtime/Optimized/Physics/mmdBulletPhysics";
 
 import type { Character } from "./character";
+import { isChestBody, steadyPhysics } from "./mmd-physics";
 import { builtinDancePose, type DanceMotion } from "./dance";
 import { GESTURES, gesturePose, type FaceRole, type Gesture } from "./gestures";
 import { BONES, blinkWeight, envelope, faceRig, findBone, sortVmds, type FaceRig, type VmdFile, type VmdSet } from "./mmd-face";
@@ -96,7 +97,7 @@ export class MmdAvatar implements Character {
   /** A motion picked in the picker; loops instead of the folder's idle. */
   private pickedIdle: VmdFile | null | undefined = undefined;
   private modelUrl = "";
-  private info = { name: "", rigidBodies: 0 };
+  private info = { name: "", rigidBodies: 0, chest: [] as string[] };
 
   /** Model height range in world units (feet at minY). */
   private minY = 0;
@@ -191,9 +192,10 @@ export class MmdAvatar implements Character {
       const wasm = await GetMmdWasmInstance(new MmdWasmInstanceTypeSPR());
       const physics = new MultiPhysicsRuntime(wasm);
       physics.setGravity(new Vector3(0, -98, 0));
-      // One physics step per drawn frame, like MMD itself.
-      physics.fixedTimeStep = 1 / FPS;
-      physics.maxSubSteps = 2;
+      // Small steps (120 Hz, four per drawn frame): with one step per frame, fast
+      // moves like dancing pulled hair and clothes apart before the joints caught up.
+      physics.fixedTimeStep = 1 / 120;
+      physics.maxSubSteps = 8;
       physics.register(this.scene);
       this.physics = physics;
       this.runtime = new MmdRuntime(this.scene, new MmdBulletPhysics(physics));
@@ -218,7 +220,16 @@ export class MmdAvatar implements Character {
     // createMmdModel trims the loader's metadata, so read what we need first.
     const meta = mesh.metadata as MmdModelMetadata;
     this.morphNames = [...new Set(meta.morphs.map((m) => m.name))];
-    this.info = { name: meta.header.modelName, rigidBodies: meta.rigidBodies.length };
+    this.info = {
+      name: meta.header.modelName,
+      rigidBodies: meta.rigidBodies.length,
+      chest: meta.rigidBodies.filter((b) => b.physicsMode !== 0 && isChestBody(b.name)).map((b) => b.name),
+    };
+    // Heavier, steadier hair, chest and clothes (read when the physics is built below).
+    const steady = steadyPhysics(meta.rigidBodies, meta.joints);
+    const writable = meta as { -readonly [K in "rigidBodies" | "joints"]: MmdModelMetadata[K] };
+    writable.rigidBodies = steady.bodies;
+    writable.joints = steady.joints;
     this.mmd = this.runtime!.createMmdModel(mesh, { materialProxyConstructor: MmdStandardMaterialProxy });
     this.modelUrl = url;
 
@@ -716,7 +727,7 @@ export class MmdAvatar implements Character {
       `mmd ${this.info.name}`,
       `bones ${this.bones.size}`,
       `morphs ${this.morphNames.length}`,
-      `rigid bodies ${this.info.rigidBodies}`,
+      `rigid bodies ${this.info.rigidBodies} (chest: ${this.info.chest.join(",") || "none"})`,
       `blink ${this.rig.blink}`,
       `mouth ${this.rig.mouth}`,
       `emotions ${Object.keys(this.rig.emotions).join(",")}`,
