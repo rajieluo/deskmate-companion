@@ -93,6 +93,8 @@ export class MmdAvatar implements Character {
   /** When the built-in dance started, while it plays. */
   private builtinDance: number | null = null;
   private danceMusic: HTMLAudioElement | null = null;
+  /** Whether the window is widened for a dance. */
+  private wideWindow = false;
   /** Cancels a dance still loading when something else starts. */
   private danceId = 0;
   /** How much the head and body follow the cursor (eased to 0 while dancing). */
@@ -282,6 +284,7 @@ export class MmdAvatar implements Character {
 
   dispose() {
     this.disposed = true;
+    if (this.wideWindow) host.danceWindow(false);
     this.loadId++;
     this.endDance();
     window.removeEventListener("resize", this.onResize);
@@ -618,6 +621,12 @@ export class MmdAvatar implements Character {
       .filter((b): b is IMmdRuntimeLinkedBone => b !== null);
     const identity = Quaternion.Identity();
     for (const b of controlled) b.setRotationQuaternion(identity, Space.LOCAL);
+
+    // Widen the window while she dances, so big moves stay in view.
+    if (this.dancing !== this.wideWindow) {
+      this.wideWindow = this.dancing;
+      host.danceWindow(this.wideWindow);
+    }
 
     // 1. The motion, if any (looped by hand: the runtime itself stays paused).
     const p = this.playing;

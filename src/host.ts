@@ -105,6 +105,11 @@ export async function resizeWindow(factor: number) {
   await w.setSize(new LogicalSize(width, height));
 }
 
+/** Widens the window while she dances (`wide`), or puts it back. */
+export function danceWindow(wide: boolean) {
+  if (inTauri) void invoke("dance_window", { wide }).catch((e) => console.warn("[window]", e));
+}
+
 // --- Claude chat (runs on the Rust side; see src-tauri/src/chat.rs).
 
 export interface ChatStatus {

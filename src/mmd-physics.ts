@@ -43,13 +43,13 @@ export interface PhysicsTuning {
 }
 
 /** Heavier, steadier hair: Roger found the model's own values far too floaty. */
-export const STEADY: PhysicsTuning = { damping: 0.5, swing: 0.7, stretch: 0.2, spring: 1, minSpring: 0 };
+export const STEADY: PhysicsTuning = { damping: 0.65, swing: 0.85, stretch: 0.2, spring: 1, minSpring: 0 };
 
 /** Clothing (skirts, ribbons, coats, tails…): less floaty and a little stiffer than the hair. */
-export const STEADY_CLOTHING: PhysicsTuning = { damping: 0.7, swing: 0.6, stretch: 0.15, spring: 1.5, minSpring: 0 };
+export const STEADY_CLOTHING: PhysicsTuning = { damping: 0.8, swing: 0.75, stretch: 0.15, spring: 1.5, minSpring: 0 };
 
 /** The chest, stiffer still (Roger asked twice for a stiffer chest). */
-export const STEADY_CHEST: PhysicsTuning = { damping: 0.9, swing: 0.15, stretch: 0, spring: 4, minSpring: 200 };
+export const STEADY_CHEST: PhysicsTuning = { damping: 0.95, swing: 0.25, stretch: 0, spring: 4, minSpring: 200 };
 
 /** Rigid body names used for the chest (Japanese, Chinese, English). */
 const CHEST = /胸|乳|おっぱい|オッパイ|bust|breast|boob|oppai|chest|mune/i;

@@ -894,6 +894,40 @@ fn clamp_into(pos: (i32, i32), size: (i32, i32), area: (i32, i32, i32, i32)) -> 
     (x, y)
 }
 
+/// The window's logical size before a dance widened it; `Some` while she dances.
+static DANCE_WINDOW: std::sync::Mutex<Option<(f64, f64)>> = std::sync::Mutex::new(None);
+
+/// How much wider the window gets while she dances (Roger: "triple it").
+const DANCE_WIDEN: f64 = 3.0;
+
+/// Widens the window while she dances, so big moves don't leave it, and puts it
+/// back afterwards. The window stays centred where it is and the wide size is
+/// never saved as her window size.
+#[tauri::command]
+fn dance_window<R: Runtime>(window: WebviewWindow<R>, wide: bool) -> Result<(), String> {
+    let mut held = DANCE_WINDOW.lock().map_err(|e| e.to_string())?;
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    let size = window.inner_size().map_err(|e| e.to_string())?.to_logical::<f64>(scale);
+    let pos = window.outer_position().map_err(|e| e.to_string())?;
+    let (width, height) = match (wide, *held) {
+        (true, None) => {
+            *held = Some((size.width, size.height));
+            (size.width * DANCE_WIDEN, size.height)
+        }
+        (false, Some(old)) => {
+            *held = None;
+            old
+        }
+        _ => return Ok(()),
+    };
+    // Keep the centre: move left by half of what the width grows (right when it shrinks).
+    let dx = ((width - size.width) * scale / 2.0).round() as i32;
+    let _ = window.set_size(tauri::LogicalSize::new(width, height));
+    let _ = window.set_position(PhysicalPosition::new(pos.x - dx, pos.y));
+    keep_on_screen(&window, width, height);
+    Ok(())
+}
+
 fn reset_position<R: Runtime>(window: &WebviewWindow<R>) {
     if let (Ok(Some(monitor)), Ok(size)) = (window.primary_monitor(), window.outer_size()) {
         let area = monitor.work_area();
@@ -1364,7 +1398,8 @@ pub fn run() {
                     }
                     let Ok(scale) = w.scale_factor() else { return };
                     let size = size.to_logical::<f64>(scale);
-                    if sane_size(size.width, size.height) {
+                    let dancing = DANCE_WINDOW.lock().map(|d| d.is_some()).unwrap_or(false);
+                    if !dancing && sane_size(size.width, size.height) {
                         let new = [size.width.round(), size.height.round()];
                         if store.settings().window_size != Some(new) {
                             store.update(|s| s.window_size = Some(new));
@@ -1383,6 +1418,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_model,
+            dance_window,
             pick_model,
             chat_status,
             set_api_key,
