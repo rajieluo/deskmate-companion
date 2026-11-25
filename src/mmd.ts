@@ -102,7 +102,7 @@ export class MmdAvatar implements Character {
   /** A motion picked in the picker; loops instead of the folder's idle. */
   private pickedIdle: VmdFile | null | undefined = undefined;
   private modelUrl = "";
-  private info = { name: "", rigidBodies: 0, chest: [] as string[], hair: 0, clothing: 0 };
+  private info = { name: "", rigidBodies: 0, chest: [] as string[], hair: 0, clothing: 0, heavy: 0 };
 
   /** Model height range in world units (feet at minY). */
   private minY = 0;
@@ -231,6 +231,7 @@ export class MmdAvatar implements Character {
       chest: meta.rigidBodies.filter((b) => b.physicsMode !== 0 && bodyKind(b.name) === "chest").map((b) => b.name),
       hair: meta.rigidBodies.filter((b) => b.physicsMode !== 0 && bodyKind(b.name) === "hair").length,
       clothing: meta.rigidBodies.filter((b) => b.physicsMode !== 0 && bodyKind(b.name) === "clothing").length,
+      heavy: meta.rigidBodies.filter((b) => b.physicsMode !== 0 && bodyKind(b.name) === "heavy").length,
     };
     // Heavier, steadier hair, chest and clothes (read when the physics is built below).
     const steady = steadyPhysics(meta.rigidBodies, meta.joints);
@@ -766,7 +767,7 @@ export class MmdAvatar implements Character {
       `mmd ${this.info.name}`,
       `bones ${this.bones.size}`,
       `morphs ${this.morphNames.length}`,
-      `rigid bodies ${this.info.rigidBodies} (hair ${this.info.hair}, clothing ${this.info.clothing}, chest: ${this.info.chest.join(",") || "none"})`,
+      `rigid bodies ${this.info.rigidBodies} (hair ${this.info.hair}, clothing ${this.info.clothing}, coats ${this.info.heavy}, chest: ${this.info.chest.join(",") || "none"})`,
       `blink ${this.rig.blink}`,
       `mouth ${this.rig.mouth}`,
       `emotions ${Object.keys(this.rig.emotions).join(",")}`,
