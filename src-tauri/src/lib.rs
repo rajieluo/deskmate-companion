@@ -897,6 +897,11 @@ fn clamp_into(pos: (i32, i32), size: (i32, i32), area: (i32, i32, i32, i32)) -> 
 /// The window's logical size before a dance widened it; `Some` while she dances.
 static DANCE_WINDOW: std::sync::Mutex<Option<(f64, f64)>> = std::sync::Mutex::new(None);
 
+/// Set while the window is widened for a dance, so the resize handler doesn't save
+/// the wide size. Separate from `DANCE_WINDOW`: resizing fires that handler on this
+/// same (main) thread, so it must never wait on a lock.
+static DANCE_WIDE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// How much wider the window gets while she dances (Roger: "triple it").
 const DANCE_WIDEN: f64 = 3.0;
 
@@ -905,26 +910,35 @@ const DANCE_WIDEN: f64 = 3.0;
 /// never saved as her window size.
 #[tauri::command]
 fn dance_window<R: Runtime>(window: WebviewWindow<R>, wide: bool) -> Result<(), String> {
-    let mut held = DANCE_WINDOW.lock().map_err(|e| e.to_string())?;
     let scale = window.scale_factor().map_err(|e| e.to_string())?;
     let size = window.inner_size().map_err(|e| e.to_string())?.to_logical::<f64>(scale);
     let pos = window.outer_position().map_err(|e| e.to_string())?;
-    let (width, height) = match (wide, *held) {
-        (true, None) => {
-            *held = Some((size.width, size.height));
-            (size.width * DANCE_WIDEN, size.height)
+    // The lock is released before resizing: the resize runs window events right away.
+    let (width, height) = {
+        let mut held = DANCE_WINDOW.lock().map_err(|e| e.to_string())?;
+        match (wide, *held) {
+            (true, None) => {
+                *held = Some((size.width, size.height));
+                (size.width * DANCE_WIDEN, size.height)
+            }
+            (false, Some(old)) => {
+                *held = None;
+                old
+            }
+            _ => return Ok(()),
         }
-        (false, Some(old)) => {
-            *held = None;
-            old
-        }
-        _ => return Ok(()),
     };
+    if wide {
+        DANCE_WIDE.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
     // Keep the centre: move left by half of what the width grows (right when it shrinks).
     let dx = ((width - size.width) * scale / 2.0).round() as i32;
     let _ = window.set_size(tauri::LogicalSize::new(width, height));
     let _ = window.set_position(PhysicalPosition::new(pos.x - dx, pos.y));
     keep_on_screen(&window, width, height);
+    if !wide {
+        DANCE_WIDE.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
     Ok(())
 }
 
@@ -1398,7 +1412,7 @@ pub fn run() {
                     }
                     let Ok(scale) = w.scale_factor() else { return };
                     let size = size.to_logical::<f64>(scale);
-                    let dancing = DANCE_WINDOW.lock().map(|d| d.is_some()).unwrap_or(false);
+                    let dancing = DANCE_WIDE.load(std::sync::atomic::Ordering::SeqCst);
                     if !dancing && sane_size(size.width, size.height) {
                         let new = [size.width.round(), size.height.round()];
                         if store.settings().window_size != Some(new) {
