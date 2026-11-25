@@ -10,6 +10,27 @@ import { SlashMenu } from "./slash";
 import { danceIntent, pickDance } from "./dance";
 import { gestureCue, gestureIntent, type Gesture } from "./gestures";
 
+/** Added to a dance request, so her answer is short and the dance starts soon. */
+const DANCE_NOTE =
+  "(Note from the app: you will dance for them as soon as you finish this reply. Answer in one short, upbeat sentence of at most ten words, and don't describe the dance.)";
+
+/** Babylon's loaders reject with { request, exception } rather than an Error. */
+function describeError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  const e = err as { request?: { status?: number; responseURL?: string }; exception?: unknown } | null;
+  if (e && (e.request || e.exception)) {
+    const parts = [];
+    if (e.request) parts.push(`HTTP ${e.request.status ?? "?"} ${e.request.responseURL ?? ""}`.trim());
+    if (e.exception) parts.push(e.exception instanceof Error ? e.exception.message : String(e.exception));
+    return parts.join("; ");
+  }
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+}
+
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 export class ChatUI {
@@ -72,11 +93,7 @@ export class ChatUI {
       const text = this.input.value.trim();
       this.input.value = "";
       this.slash.hide();
-      if (text && !this.appCommand(text)) {
-        void this.maybeDance(text);
-        this.maybeGesture(text);
-        void this.send(text);
-      }
+      if (text && !this.appCommand(text)) this.sendFromUser(text);
     });
     this.input.addEventListener("keydown", (e) => {
       if (e.key === "Escape") this.close();
@@ -177,11 +194,8 @@ export class ChatUI {
     this.input.placeholder = "Transcribing…";
     try {
       const text = (await host.transcribe(recording.samples)).trim();
-      if (text) {
-        void this.maybeDance(text);
-        this.maybeGesture(text);
-        await this.send(text);
-      } else this.say("Sorry, I didn't catch that.", 3000);
+      if (text) await this.sendFromUser(text);
+      else this.say("Sorry, I didn't catch that.", 3000);
     } catch (err) {
       this.say(String(err), 8000);
     } finally {
@@ -222,24 +236,59 @@ export class ChatUI {
   }
 
   /** "Dance!" makes an MMD character dance right away; the message still goes to Claude. */
-  private async maybeDance(text: string) {
-    if (!this.avatar.canDance) return;
+  /** Bumped by every message, so a dance waiting for her to finish talking is dropped. */
+  private danceTicket = 0;
+  /** Resolves when the current reply has finished streaming (or failed). */
+  private replyDone: Promise<void> = Promise.resolve();
+  private finishReply: () => void = () => {};
+
+  /** A message the user typed or said: may also start a dance or a gesture. */
+  private sendFromUser(text: string): Promise<void> {
+    const ticket = ++this.danceTicket;
+    const intent = this.avatar.canDance ? danceIntent(text) : null;
+    if (intent?.kind === "stop") this.avatar.stopDance();
+    this.maybeGesture(text);
+    const dancing = intent?.kind === "dance";
+    // She dances right after answering, so keep the answer short. Crew mode passes
+    // messages on to the first mate, so it's left alone there.
+    const ask = dancing && document.body.dataset.brain !== "crew" ? `${text}\n\n${DANCE_NOTE}` : text;
+    const sent = this.send(ask, text);
+    if (dancing) void this.danceAfterReply(text, ticket);
+    return sent;
+  }
+
+  /** Waits for her to finish answering out loud, then dances. */
+  private async danceAfterReply(text: string, ticket: number) {
     const dances = await host.danceList();
     const intent = danceIntent(text, dances.map((d) => d.name));
-    if (!intent) return;
-    if (intent.kind === "stop") {
-      this.avatar.stopDance();
-      return;
-    }
+    if (intent?.kind !== "dance") return;
+    await this.replyDone;
+    await this.speechEnded(() => ticket !== this.danceTicket);
+    if (ticket !== this.danceTicket) return;
     const picked = pickDance(dances, intent.name, this.lastDance);
     this.lastDance = picked?.name ?? null;
     host.log("info", `[dance] ${picked ? `${picked.name} (${picked.motions.length} motion files${picked.audio ? ", music" : ""})` : "built-in dance"}`);
     try {
       await this.avatar.dance(picked ? host.danceMotion(picked) : null);
     } catch (err) {
-      host.log("warn", `[dance] couldn't play ${picked?.name}: ${(err as Error).message}`);
+      host.log("warn", `[dance] couldn't play ${picked?.name}: ${describeError(err)}`);
       // Still dance, just the built-in one.
       await this.avatar.dance(null).catch(() => false);
+    }
+  }
+
+  /**
+   * Resolves once she has stopped talking: speech has started (if the voice is on)
+   * and then stayed quiet for a moment, since there are short gaps between sentences.
+   */
+  private async speechEnded(cancelled: () => boolean) {
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    if (!this.voice.enabled) return;
+    for (let waited = 0; !this.voice.speaking && waited < 8000 && !cancelled(); waited += 100) await sleep(100);
+    let quiet = 0;
+    for (let waited = 0; quiet < 1200 && waited < 60000 && !cancelled(); waited += 100) {
+      await sleep(100);
+      quiet = this.voice.speaking ? 0 : quiet + 100;
     }
   }
 
@@ -317,8 +366,11 @@ export class ChatUI {
   }
 
   async send(text: string, historyText = text) {
+    this.finishReply(); // a reply that never finished doesn't hold anyone up
+    this.replyDone = new Promise((resolve) => (this.finishReply = resolve));
     const status = await host.chatStatus();
     if (status.brain === "api" && !status.has_key) {
+      this.finishReply();
       void this.askForKey(undefined, status.provider);
       return;
     }
@@ -365,6 +417,7 @@ export class ChatUI {
   }
 
   private onDone() {
+    this.finishReply();
     // Each Claude Code run refreshes the command list on the Rust side (new skills, etc.).
     this.slash.invalidate();
     this.activity.hidden = true;
@@ -380,6 +433,7 @@ export class ChatUI {
   }
 
   private onError(kind: string, message: string) {
+    this.finishReply();
     this.bubble.classList.remove("thinking");
     this.activity.hidden = true;
     if (kind === "no_folder") {

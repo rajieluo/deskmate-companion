@@ -31,7 +31,7 @@
         "script-src": "'self' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net",
         "style-src": "'self' 'unsafe-inline'",
         "img-src": "'self' data: blob: model: http://model.localhost",
-        "media-src": "'self' data: blob:",
+        "media-src": "'self' data: blob: model: http://model.localhost",
         "font-src": "'self' data:",
         "connect-src": "'self' ipc: http://ipc.localhost model: http://model.localhost data: blob: https:",
         "worker-src": "'self' blob:",

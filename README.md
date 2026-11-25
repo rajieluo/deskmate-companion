@@ -224,7 +224,7 @@ MMD characters have six short built-in emotes, made from their bones and face mo
 
 ### Dancing (MMD models)
 
-Ask an MMD character to dance in chat, typed or out loud, and she dances once, then goes back to her idle. Your message still goes to Claude, so she answers too.
+Ask an MMD character to dance in chat, typed or out loud, and she gives a short answer, finishes saying it, then dances once and goes back to her idle.
 
 - **Asking**: "dance", "please dance", "can you dance?", "do a little dance", "let's dance", "dance for me", "dance again", or a dance's name: "dance Lamb", "do the Lamb dance". Talking *about* dancing ("I went dancing last night", "don't dance") doesn't start one. **"Stop dancing"** (or just "stop") stops her.
 - **The dances folder** is `Documents\Desktop Assistant\Dances`, shared by every MMD model. The app creates it on first start with a short `README.txt`, and the tray's **Open dances folder** opens it. To use another folder, set `"dances_folder"` in `settings.json`.
